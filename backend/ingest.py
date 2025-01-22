@@ -2,7 +2,8 @@
 import logging
 import os
 import re
-from typing import Optional
+from typing import Optional, List
+from pathlib import Path
 
 import weaviate
 from bs4 import BeautifulSoup, SoupStrainer
@@ -11,6 +12,9 @@ from langchain.indexes import SQLRecordManager, index
 from langchain.utils.html import PREFIXES_TO_IGNORE_REGEX, SUFFIXES_TO_IGNORE_REGEX
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_weaviate import WeaviateVectorStore
+from langchain_openai import AzureOpenAIEmbeddings
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.vectorstores.azuresearch import AzureSearch
 
 from backend.constants import WEAVIATE_DOCS_INDEX_NAME
 from backend.embeddings import get_embeddings_model
@@ -192,5 +196,43 @@ def ingest_docs():
         )
 
 
+def ingest_pdfs(pdf_dir: str, recursive: bool = True) -> None:
+    """Ingest PDFs from a directory into Azure AI Search."""
+    
+    # Initialize Azure OpenAI embeddings
+    embeddings = AzureOpenAIEmbeddings(
+        azure_deployment="your-embedding-deployment",  # e.g., "text-embedding-ada-002"
+        openai_api_version="2024-02-15-preview",
+    )
+    
+    # Initialize Azure AI Search
+    vector_store = AzureSearch(
+        azure_search_endpoint="your-search-endpoint",
+        azure_search_key="your-search-key",
+        index_name="your-index-name",
+        embedding_function=embeddings,
+    )
+    
+    # Load and process PDFs
+    pdf_files = list(Path(pdf_dir).rglob("*.pdf")) if recursive else list(Path(pdf_dir).glob("*.pdf"))
+    
+    for pdf_path in pdf_files:
+        # Load PDF
+        loader = PyPDFLoader(str(pdf_path))
+        documents = loader.load()
+        
+        # Split documents
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=200,
+        )
+        splits = text_splitter.split_documents(documents)
+        
+        # Add to vector store
+        vector_store.add_documents(splits)
+
+
 if __name__ == "__main__":
+    # Use this to ingest documents
     ingest_docs()
+    # ingest_pdfs("path/to/your/pdfs")
