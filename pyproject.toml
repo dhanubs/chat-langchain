@@ -33,6 +33,7 @@ langserve = ">=0.0.41"
 sse-starlette = "^2.2.1"
 rich = "^13.9.4"
 motor = "^3.6.1"
+pymongo = ">=4.9,<4.10"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.3.0"

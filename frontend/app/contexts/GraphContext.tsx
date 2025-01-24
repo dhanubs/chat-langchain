@@ -24,6 +24,7 @@ interface GraphData {
   selectedModel: ModelOptions;
   setSelectedModel: Dispatch<SetStateAction<ModelOptions>>;
   setMessages: Dispatch<SetStateAction<BaseMessage[]>>;
+  handleUserMessage: (input: string) => Promise<void>;
   streamMessage: (params: GraphInput) => Promise<void>;
   switchSelectedThread: (thread: Thread) => Promise<void>;
 }
@@ -63,6 +64,78 @@ export function GraphProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<BaseMessage[]>([]);
   const [selectedModel, setSelectedModel] =
     useState<ModelOptions>("anthropic/claude-3-5-haiku-20241022");
+
+  const handleStreamingChunk = (content: string) => {
+    setMessages((prevMessages) => {
+      const lastMessage = prevMessages[prevMessages.length - 1];
+      
+      // If the last message is an AI message, append to it
+      if (lastMessage instanceof AIMessage) {
+        return [
+          ...prevMessages.slice(0, -1),
+          new AIMessage({
+            ...lastMessage,
+            content: lastMessage.content + content
+          })
+        ];
+      } else {
+        // Otherwise create a new AI message
+        return [
+          ...prevMessages,
+          new AIMessage({
+            content,
+            id: uuidv4()
+          })
+        ];
+      }
+    });
+  };
+
+  const handleUserMessage = async (input: string) => {
+    // Add the user's message first
+    setMessages(prev => [...prev, new HumanMessage({ content: input })]);
+
+    const response = await fetch(`/api/chat/${threadId}/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ input }),
+    });
+
+    const reader = response.body?.getReader();
+    const decoder = new TextDecoder();
+
+    if (!reader) return;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = JSON.parse(line.slice(5));
+            if (data.event === 'message') {
+              // Handle the streaming chunk
+              handleStreamingChunk(data.data.content);
+            } else if (data.event === 'error') {
+              console.error('Stream error:', data.data.error);
+              break;
+            } else if (data.event === 'end') {
+              // Handle completion
+              break;
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  };
 
   const streamMessage = async (params: GraphInput): Promise<void> => {
     if (!threadId) {
@@ -672,6 +745,7 @@ export function GraphProvider({ children }: { children: ReactNode }) {
       selectedModel,
       setSelectedModel,
       setMessages,
+      handleUserMessage,
       streamMessage,
       switchSelectedThread,
     },

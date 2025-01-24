@@ -25,7 +25,7 @@ function ChatLangChainComponent(): React.ReactElement {
   const { threadsData, userData, graphData } = useGraphContext();
   const { userId } = userData;
   const { getUserThreads, threadId: currentThread } = threadsData;
-  const { messages, setMessages, streamMessage } = graphData;
+  const { messages, setMessages, handleUserMessage } = graphData;
   const [isRunning, setIsRunning] = useState(false);
 
   const isSubmitDisabled = !userId || !currentThread;
@@ -51,16 +51,7 @@ function ChatLangChainComponent(): React.ReactElement {
     setIsRunning(true);
 
     try {
-      const humanMessage = new HumanMessage({
-        content: message.content[0].text,
-        id: uuidv4(),
-      });
-
-      setMessages((prevMessages) => [...prevMessages, humanMessage]);
-
-      await streamMessage({
-        messages: [convertToOpenAIFormat(humanMessage)],
-      });
+      await handleUserMessage(message.content[0].text);
     } finally {
       setIsRunning(false);
       // Re-fetch threads so that the current thread's title is updated.
