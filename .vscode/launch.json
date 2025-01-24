@@ -5,20 +5,16 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: FastAPI",
+            "name": "LangServe API",
             "type": "debugpy",
             "request": "launch",
-            "module": "uvicorn",
-            "args": [
-                "backend.server:app",
-                "--reload",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                "8080"
-            ],
-            "jinja": true,
-            "justMyCode": true            
+            "program": "${workspaceFolder}/backend/server.py",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "env": {
+                "ENVIRONMENT": "development",
+                "PYTHONPATH": "${workspaceFolder}"
+            }
         }
     ]
 }
