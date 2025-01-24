@@ -1,13 +1,10 @@
 from typing import Dict, List, Optional, Any
 from pydantic import BaseModel, Field
 from datetime import datetime
-from enum import Enum
-
-class ThreadStatus(str, Enum):
-    IDLE = "idle"
-    BUSY = "busy"
-    INTERRUPTED = "interrupted"
-    ERROR = "error"
+from backend.enums import ThreadStatus, OnConflictBehavior
+from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.messages import AIMessage, HumanMessage, BaseMessage
+import asyncio
 
 class Message(BaseModel):
     role: str
@@ -15,9 +12,13 @@ class Message(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     
 class ChatInput(BaseModel):
-    messages: List[Message]
+    input: str
+    include_history: bool = False
+
+class ChatRequest(BaseModel):
+    message: str
     config: Optional[Dict] = None
-    stream: bool = False
+    stream: bool = True
 
 class Thread(BaseModel):
     thread_id: str
@@ -43,23 +44,10 @@ class ThreadState(BaseModel):
     metadata: Optional[Dict] = None 
 
 
-class ChatRequest(BaseModel):
-    message: str
-    stream: bool = False
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "message": "What is LangChain?",
-                "stream": False
-            }
-        }
-
-
 class ThreadCreatePayload(BaseModel):
     metadata: Optional[Dict] = None
     thread_id: Optional[str] = None
-    if_exists: Optional[str] = None
+    if_exists: Optional[OnConflictBehavior] = None
 
 
 class ThreadSearchPayload(BaseModel):
@@ -67,6 +55,16 @@ class ThreadSearchPayload(BaseModel):
     limit: int = 10
     offset: int = 0
     status: Optional[ThreadStatus] = None
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "metadata": {"user_id": "123", "source": "web"},
+                "limit": 10,
+                "offset": 0,
+                "status": "idle"
+            }
+        }
 
 class ThreadUpdatePayload(BaseModel):
     metadata: Optional[Dict] = None
@@ -87,3 +85,31 @@ class ThreadHistoryPayload(BaseModel):
     before: Optional[Dict] = None
     metadata: Optional[Dict] = None
     checkpoint: Optional[Dict] = None
+
+class ThreadChatMessageHistory(BaseChatMessageHistory):
+    """Adapter class to make Thread compatible with LangChain's BaseChatMessageHistory"""
+    
+    def __init__(self, thread: Thread):
+        self.thread = thread
+        self._messages = None
+
+    @property
+    def messages(self):
+        """Return messages in LangChain format (sync)"""
+        if self._messages is None and self.thread and hasattr(self.thread, 'messages'):
+            self._messages = [
+                AIMessage(content=msg.content) if msg.role == "assistant" 
+                else HumanMessage(content=msg.content)
+                for msg in self.thread.messages
+            ]
+        return self._messages or []
+
+    def add_messages(self, messages: List[BaseMessage]) -> None:
+        """Add messages to the store"""
+        if self._messages is None:
+            self._messages = []
+        self._messages.extend(messages)
+
+    def clear(self) -> None:
+        """Clear messages from the store"""
+        self._messages = None

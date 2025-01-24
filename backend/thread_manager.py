@@ -1,28 +1,43 @@
 from typing import Dict, List, Optional, Any
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import MongoClient
 from datetime import datetime
 import uuid
 from enum import Enum
 from backend.models import Thread, Message, ThreadState, Checkpoint
-
-class ThreadStatus(str, Enum):
-    IDLE = "idle"
-    BUSY = "busy"
-    INTERRUPTED = "interrupted"
-    ERROR = "error"
-
-class OnConflictBehavior(str, Enum):
-    ERROR = "error"
-    UPDATE = "update"
-    REUSE = "reuse"
+from backend.enums import OnConflictBehavior, ThreadStatus
+import anyio
+import sniffio
+import asyncio
 
 class ThreadManager:
     def __init__(self, mongo_uri: str, database_name: str = "chatapp"):
+        """Initialize ThreadManager with both async and sync clients.
+        
+        We need both clients because:
+        1. The main FastAPI application uses async operations for better performance
+        2. However, LangChain's RunnableWithMessageHistory expects a synchronous 
+           get_session_history function and cannot handle async operations
+        3. Attempting to run async code synchronously inside an async context 
+           (like FastAPI) leads to event loop conflicts
+        4. Using pymongo's synchronous client is the cleanest solution to avoid 
+           these event loop issues while maintaining compatibility with LangChain
+        """
+        # Async client for main operations
         self.client = AsyncIOMotorClient(mongo_uri)
         self.db = self.client[database_name]
         self.threads = self.db.threads
         self.states = self.db.thread_states
+        
+        # Sync client specifically for LangChain compatibility
+        self.sync_client = MongoClient(mongo_uri)
+        self.sync_db = self.sync_client[database_name]
     
+    def get_sync(self, thread_id: str) -> Optional[Thread]:
+        """Synchronous version of get method using pymongo"""
+        result = self.sync_db.threads.find_one({"thread_id": thread_id})
+        return Thread(**result) if result else None
+
     async def create(
         self,
         metadata: Optional[Dict] = None,

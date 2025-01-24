@@ -2,18 +2,22 @@ from langgraph.graph import Graph
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from typing import AsyncIterator, Dict, Any
+from typing import AsyncIterator, Dict, Any, List, Optional
 import os
 from backend.chain import create_chain, get_retriever
+from backend.thread_manager import ThreadManager
 
 class ChatWorkflow:
-    def __init__(self, provider: str = "azure", model: str = "gpt-35-turbo-16k"):
+    def __init__(self, provider: str = "azure", model: str = "gpt-35-turbo-16k", thread_manager: ThreadManager = None):
+        self.provider = provider
+        self.default_model = model
+        self.thread_manager = thread_manager
         self.retriever = get_retriever()
         self.chain = create_chain(
             retriever=self.retriever,
+            thread_manager=thread_manager,
             provider=provider,
-            model=model,
-            streaming=True
+            model=model
         )
         
         # Create the workflow graph
@@ -74,18 +78,69 @@ class ChatWorkflow:
         }):
             yield event
     
-    async def generate_response(self, message: str, chat_history: list = None) -> str:
-        """Generate a complete response (non-streaming)"""
-        result = await self.chain.ainvoke({
-            "question": message,
+    async def stream_response(
+        self, 
+        input: str,
+        thread_id: str,
+        chat_history: List[Dict] = None,
+        config: Optional[Dict] = None
+    ) -> AsyncIterator[str]:
+        """Stream a response using the chain"""
+        # Create the input dictionary
+        input_dict = {
+            "input": input,
             "chat_history": chat_history or []
-        })
-        return result
+        }
+        
+        # Add session_id to config
+        chain_config = {
+            "configurable": {
+                "session_id": thread_id
+            }
+        }
+        
+        # Get the stream with proper config
+        stream = self.chain.astream(
+            input_dict,
+            config=chain_config
+        )
+        
+        # Iterate over the stream
+        async for chunk in stream:
+            if isinstance(chunk, dict):
+                yield chunk.get("output", "")
+            else:
+                yield str(chunk)
     
-    async def stream_response(self, message: str, chat_history: list = None) -> AsyncIterator[str]:
-        """Stream the response chunk by chunk"""
-        async for result in self.graph.astream({
-            "message": message,
-            "chat_history": chat_history or []
-        }):
-            yield result["chunk"] 
+    async def generate_response(
+        self, 
+        message: str,
+        thread_id: str,
+        chat_history: List[Dict] = None,
+        config: Optional[Dict] = None
+    ) -> str:
+        """Generate a complete response (non-streaming)"""
+        # Update chain if different model specified in config
+        if config and config.get("model_name"):
+            self.chain = create_chain(
+                retriever=self.retriever,
+                thread_manager=self.thread_manager,
+                provider=self.provider,
+                model=config["model_name"]
+            )
+        
+        result = await self.chain.ainvoke(
+            {
+                "input": message,
+                "chat_history": chat_history or []
+            },
+            config={
+                "configurable": {
+                    "session_id": thread_id
+                }
+            }
+        )
+        
+        if isinstance(result, dict):
+            return result.get("output", "")
+        return str(result) 
