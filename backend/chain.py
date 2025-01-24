@@ -89,11 +89,12 @@ def create_chain(
     retriever: BaseRetriever,
     provider: str = "azure",
     model: Optional[str] = None,
+    streaming: bool = False,
 ) -> RunnablePassthrough:
     """Create a chain for question answering with citations."""
     
     # Create base LLM that can be configured at runtime
-    base_llm = get_llm(provider, model).configurable_alternatives(
+    base_llm = get_llm(provider, model, streaming=streaming).configurable_alternatives(
         ConfigurableField(id="model_name"),
         default_key="azure-gpt4",
         azure_gpt4=get_llm("azure", "gpt-4"),
