@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-export const runtime = "edge";
+import { logger } from '@/app/lib/logger';
 
 function getCorsHeaders() {
   return {
@@ -11,6 +10,17 @@ function getCorsHeaders() {
 }
 
 async function handleRequest(req: NextRequest, method: string) {
+  const requestId = crypto.randomUUID();
+  const startTime = Date.now();
+
+  logger.info(`Request started`, {
+    requestId,
+    method,
+    url: req.url,
+    path: req.nextUrl.pathname,
+    userAgent: req.headers.get('user-agent'),
+  });
+
   try {
     const path = req.nextUrl.pathname.replace(/^\/?api\//, "");
     const url = new URL(req.url);
@@ -21,21 +31,45 @@ async function handleRequest(req: NextRequest, method: string) {
       ? `?${searchParams.toString()}`
       : "";
 
+    const targetUrl = `${process.env.API_BASE_URL}/${path}${queryString}`;
+    
+    logger.info(`Forwarding request`, {
+      requestId,
+      targetUrl,
+      method,
+    });
+
     const options: RequestInit = {
       method,
       headers: {
         "x-api-key": process.env.LANGCHAIN_API_KEY || "",
+        "x-request-id": requestId,
       },
     };
 
     if (["POST", "PUT", "PATCH"].includes(method)) {
-      options.body = await req.text();
+      const body = await req.json();
+      options.body = JSON.stringify(body);
+      options.headers = {
+        ...options.headers,
+        "Content-Type": "application/json",
+      };
+      
+      logger.info(`Request body received`, {
+        requestId,
+        bodyLength: JSON.stringify(body).length,
+        bodyPreview: JSON.stringify(body).substring(0, 100) + (JSON.stringify(body).length > 100 ? '...' : ''),
+      });
     }
 
-    const res = await fetch(
-      `${process.env.API_BASE_URL}/${path}${queryString}`,
-      options,
-    );
+    const res = await fetch(targetUrl, options);
+
+    const duration = Date.now() - startTime;
+    logger.info(`Request completed`, {
+      requestId,
+      status: res.status,
+      duration,
+    });
 
     return new NextResponse(res.body, {
       status: res.status,
@@ -43,10 +77,28 @@ async function handleRequest(req: NextRequest, method: string) {
       headers: {
         ...res.headers,
         ...getCorsHeaders(),
+        'x-request-id': requestId,
       },
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: e.status ?? 500 });
+    const duration = Date.now() - startTime;
+    logger.error(`Request failed`, {
+      requestId,
+      duration,
+      url: req.url,
+      error: e,
+    });
+
+    return NextResponse.json(
+      { error: e.message },
+      { 
+        status: e.status ?? 500,
+        headers: {
+          ...getCorsHeaders(),
+          'x-request-id': requestId,
+        }
+      }
+    );
   }
 }
 
