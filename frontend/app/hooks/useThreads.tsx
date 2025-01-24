@@ -5,6 +5,8 @@ import { getCookie, setCookie } from "../utils/cookies";
 import { useToast } from "./use-toast";
 import { THREAD_ID_COOKIE_NAME } from "../utils/constants";
 
+// export const runtime = "edge";
+
 export const createClient = () => {
   const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000/api";
   return new Client({
