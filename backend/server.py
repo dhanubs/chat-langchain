@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 from dotenv import load_dotenv
-from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
+import os
 
 # Load environment variables before importing app
 load_dotenv()
@@ -19,4 +19,13 @@ app.add_middleware(
 )
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    # Development mode with reload when running directly
+    uvicorn.run(
+        "backend.server:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True if os.getenv("ENVIRONMENT") != "production" else False        
+    )
+else:
+    # Production mode when imported
+    application = app
