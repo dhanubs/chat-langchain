@@ -11,6 +11,7 @@ class ChatWorkflow:
     def __init__(self, provider: str = "azure", model: str = "gpt-35-turbo-16k", thread_manager: ThreadManager = None):
         self.provider = provider
         self.default_model = model
+        self.current_model = model  # Track current model
         self.thread_manager = thread_manager
         self.retriever = get_retriever()
         self.chain = create_chain(
@@ -78,6 +79,24 @@ class ChatWorkflow:
         }):
             yield event
     
+    def _update_chain_if_model_changed(self, config: Optional[Dict] = None) -> bool:
+        """Update chain if model has changed. Returns True if chain was updated."""
+        if not config:
+            return False
+            
+        new_model = config.get("model_name")
+        if new_model and new_model != self.current_model:
+            self.chain = create_chain(
+                retriever=self.retriever,
+                thread_manager=self.thread_manager,
+                provider=self.provider,
+                model=new_model,
+                streaming=True
+            )
+            self.current_model = new_model
+            return True
+        return False
+    
     async def stream_response(
         self, 
         input: str,
@@ -86,16 +105,20 @@ class ChatWorkflow:
         config: Optional[Dict] = None
     ) -> AsyncIterator[str]:
         """Stream a response using the chain"""
+        # Update chain if model has changed
+        self._update_chain_if_model_changed(config)
+        
         # Create the input dictionary
         input_dict = {
-            "input": input,
+            "question": input,
             "chat_history": chat_history or []
         }
         
         # Add session_id to config
         chain_config = {
             "configurable": {
-                "session_id": thread_id
+                "session_id": thread_id,
+                **(config or {})  # Include all config options
             }
         }
         
@@ -120,23 +143,18 @@ class ChatWorkflow:
         config: Optional[Dict] = None
     ) -> str:
         """Generate a complete response (non-streaming)"""
-        # Update chain if different model specified in config
-        if config and config.get("model_name"):
-            self.chain = create_chain(
-                retriever=self.retriever,
-                thread_manager=self.thread_manager,
-                provider=self.provider,
-                model=config["model_name"]
-            )
+        # Update chain if model has changed
+        self._update_chain_if_model_changed(config)
         
         result = await self.chain.ainvoke(
             {
-                "input": message,
+                "question": message,
                 "chat_history": chat_history or []
             },
             config={
                 "configurable": {
-                    "session_id": thread_id
+                    "session_id": thread_id,
+                    **(config or {})  # Include all config options
                 }
             }
         )

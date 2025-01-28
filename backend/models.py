@@ -23,11 +23,26 @@ class ChatRequest(BaseModel):
 class Thread(BaseModel):
     thread_id: str
     metadata: Dict[str, Any]
-    messages: List[Message] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: Optional[datetime] = None
     status: ThreadStatus = Field(default=ThreadStatus.IDLE)
     error: Optional[str] = None
+    values: Optional[Dict[str, Any]] = Field(default_factory=lambda: {"messages": []})
+    interrupts: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict)
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None
+        }
+        
+    @property
+    def messages(self) -> List[Dict[str, Any]]:
+        """
+        Get messages from values. This property exists for backwards compatibility.
+        """
+        if not self.values:
+            return []
+        return self.values.get("messages", [])
 
 class Checkpoint(BaseModel):
     thread_id: str
@@ -96,10 +111,10 @@ class ThreadChatMessageHistory(BaseChatMessageHistory):
     @property
     def messages(self):
         """Return messages in LangChain format (sync)"""
-        if self._messages is None and self.thread and hasattr(self.thread, 'messages'):
+        if self._messages is None and self.thread and self.thread.values:
             self._messages = [
-                AIMessage(content=msg.content) if msg.role == "assistant" 
-                else HumanMessage(content=msg.content)
+                AIMessage(content=msg["content"]) if msg["type"] == "assistant" 
+                else HumanMessage(content=msg["content"])
                 for msg in self.thread.messages
             ]
         return self._messages or []

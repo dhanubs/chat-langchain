@@ -1,14 +1,10 @@
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import MongoClient
 from datetime import datetime
 import uuid
-from enum import Enum
-from backend.models import Thread, Message, ThreadState, Checkpoint
+from backend.models import Thread
 from backend.enums import OnConflictBehavior, ThreadStatus
-import anyio
-import sniffio
-import asyncio
 
 class ThreadManager:
     def __init__(self, mongo_uri: str, database_name: str = "chatapp"):
@@ -27,7 +23,6 @@ class ThreadManager:
         self.client = AsyncIOMotorClient(mongo_uri)
         self.db = self.client[database_name]
         self.threads = self.db.threads
-        self.states = self.db.thread_states
         
         # Sync client specifically for LangChain compatibility
         self.sync_client = MongoClient(mongo_uri)
@@ -35,8 +30,13 @@ class ThreadManager:
     
     def get_sync(self, thread_id: str) -> Optional[Thread]:
         """Synchronous version of get method using pymongo"""
-        result = self.sync_db.threads.find_one({"thread_id": thread_id})
-        return Thread(**result) if result else None
+        try:
+            result = self.sync_db.threads.find_one({"thread_id": thread_id})
+            if not result:
+                return None
+            return Thread(**result)
+        except Exception:
+            return None
 
     async def create(
         self,
@@ -54,11 +54,15 @@ class ThreadManager:
                     return existing
                 # else UPDATE - continue with creation/update
         
+        # Initialize with empty values
         thread = Thread(
             thread_id=thread_id or str(uuid.uuid4()),
             metadata=metadata or {},
-            created_at=datetime.utcnow()
+            values={"messages": []},
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow()
         )
+        
         await self.threads.update_one(
             {"thread_id": thread.thread_id},
             {"$set": thread.dict()},
@@ -72,10 +76,14 @@ class ThreadManager:
         if not source:
             raise ValueError(f"Thread {thread_id} not found")
         
+        # Safely copy values and metadata
+        new_values = source.values.copy() if source.values else None
+        new_metadata = source.metadata.copy() if source.metadata else {}
+        
         new_thread = Thread(
             thread_id=str(uuid.uuid4()),
-            metadata=source.metadata.copy(),
-            messages=source.messages.copy(),
+            metadata=new_metadata,
+            values=new_values,
             created_at=datetime.utcnow()
         )
         await self.threads.insert_one(new_thread.dict())
@@ -83,95 +91,31 @@ class ThreadManager:
 
     async def update(self, thread_id: str, metadata: Optional[Dict] = None) -> Thread:
         """Update a thread's metadata"""
-        result = await self.threads.update_one(
-            {"thread_id": thread_id},
-            {
-                "$set": {
-                    "metadata": metadata or {},
-                    "updated_at": datetime.utcnow()
-                }
-            }
-        )
-        if result.modified_count == 0:
+        # Get current thread to preserve values
+        current_thread = await self.get(thread_id)
+        if not current_thread:
             raise ValueError(f"Thread {thread_id} not found")
-        return await self.get(thread_id)
-
-    async def get_state(
-        self,
-        thread_id: str,
-        checkpoint: Optional[str] = None,
-        include_subgraphs: bool = False
-    ) -> ThreadState:
-        """Get thread state"""
-        query = {"thread_id": thread_id}
-        if checkpoint:
-            query["checkpoint"] = checkpoint
-        
-        state = await self.states.find_one(query)
-        if not state:
-            raise ValueError(f"Thread state not found for {thread_id}")
-        return ThreadState(**state)
-
-    async def update_state(
-        self,
-        thread_id: str,
-        values: Dict,
-        checkpoint: Optional[Dict] = None,
-        checkpoint_id: Optional[str] = None,
-        as_node: Optional[str] = None
-    ) -> Dict:
-        """Update thread state"""
-        state_doc = {
-            "thread_id": thread_id,
-            "values": values,
+            
+        update_dict = {
             "updated_at": datetime.utcnow()
         }
-        if checkpoint:
-            state_doc["checkpoint"] = checkpoint
-        if checkpoint_id:
-            state_doc["checkpoint_id"] = checkpoint_id
-        if as_node:
-            state_doc["node"] = as_node
-            
-        await self.states.update_one(
+        
+        # Only update metadata if provided
+        if metadata is not None:
+            update_dict["metadata"] = metadata
+        
+        result = await self.threads.update_one(
             {"thread_id": thread_id},
-            {"$set": state_doc},
-            upsert=True
+            {"$set": update_dict}
         )
-        return {"configurable": {}}  # Return empty config as per TypeScript definition
-
-    async def patch_state(self, thread_id: str, metadata: Dict) -> None:
-        """Patch thread state metadata"""
-        await self.states.update_one(
-            {"thread_id": thread_id},
-            {"$set": {"metadata": metadata}}
-        )
-
-    async def get_history(
-        self,
-        thread_id: str,
-        limit: Optional[int] = None,
-        before: Optional[Dict] = None,
-        checkpoint: Optional[Dict] = None,
-        metadata: Optional[Dict] = None
-    ) -> List[ThreadState]:
-        """Get thread state history"""
-        query = {"thread_id": thread_id}
-        if before:
-            query["created_at"] = {"$lt": before.get("created_at")}
-        if checkpoint:
-            query.update({f"checkpoint.{k}": v for k, v in checkpoint.items()})
-        if metadata:
-            query.update({f"metadata.{k}": v for k, v in metadata.items()})
+        
+        if result.modified_count == 0:
+            raise ValueError(f"Thread {thread_id} not found")
             
-        cursor = self.states.find(query).sort("created_at", -1)
-        if limit:
-            cursor = cursor.limit(limit)
-            
-        states = await cursor.to_list(length=None)
-        return [ThreadState(**state) for state in states]
-
+        return await self.get(thread_id)
+    
     async def get(self, thread_id: str) -> Optional[Thread]:
+        """Get a thread by ID"""
         thread_dict = await self.threads.find_one({"thread_id": thread_id})
         return Thread(**thread_dict) if thread_dict else None
     
@@ -197,8 +141,16 @@ class ThreadManager:
         # Build the query
         query = {}
         if metadata:
-            query.update({f"metadata.{k}": v for k, v in metadata.items()})
-        if status:
+            # Only include non-None values in metadata query
+            metadata_query = {
+                f"metadata.{k}": v 
+                for k, v in metadata.items() 
+                if v is not None
+            }
+            if metadata_query:
+                query.update(metadata_query)
+                
+        if status is not None:
             query["status"] = status
         
         # Execute query with pagination and sorting
@@ -209,35 +161,17 @@ class ThreadManager:
         
         # Convert to list of Thread objects
         threads = await cursor.to_list(length=None)
-        return [Thread(**thread) for thread in threads]
-
-    async def get_thread_state(self, thread_id: str) -> Dict:
-        """
-        Get the current state of a thread.
+        thread_objects = []
         
-        Args:
-            thread_id: ID of the thread
-            
-        Returns:
-            Dict containing thread state
-        
-        Raises:
-            KeyError: If thread_id doesn't exist
-        """
-        thread_dict = await self.threads.find_one({"thread_id": thread_id})
-        if not thread_dict:
-            raise KeyError(f"Thread {thread_id} not found")
-        
-        thread = Thread(**thread_dict)
-        return {
-            "id": thread.thread_id,
-            "status": getattr(thread, 'status', None),
-            "metadata": thread.metadata,
-            "created_at": thread.created_at,
-            "messages": [msg.dict() for msg in thread.messages],
-            "error": getattr(thread, 'error', None)
-        }
-
+        for thread_dict in threads:
+            try:
+                thread_objects.append(Thread(**thread_dict))
+            except Exception:
+                # Skip invalid thread documents
+                continue
+                
+        return thread_objects
+    
     async def delete(self, thread_id: str) -> bool: 
         """
         Delete a thread and its associated state.
@@ -248,9 +182,6 @@ class ThreadManager:
         Returns:
             bool: True if thread was deleted, False if thread wasn't found
         """
-        # Delete thread state first
-        await self.states.delete_many({"thread_id": thread_id})
-        
         # Delete the thread
         result = await self.threads.delete_one({"thread_id": thread_id})
         
@@ -273,25 +204,35 @@ class ThreadManager:
         if not thread_dict:
             return None
         
-        # Create new message
-        message = {
-            "role": role,
-            "content": content,
-            "created_at": datetime.utcnow()
-        }
+        current_time = datetime.utcnow()
         
-        # Add message to thread
+        # Get current values or initialize empty
+        current_values = thread_dict.get("values") or {}
+        current_messages = current_values.get("messages", []) if current_values else []
+        
+        # Add the new message to values
+        current_messages.append({
+            "type": role,
+            "content": content,
+            "updated_at": current_time.isoformat()
+        })
+        
+        # Update thread with new values
         result = await self.threads.update_one(
             {"thread_id": thread_id},
             {
-                "$push": {"messages": message},
-                "$set": {"updated_at": datetime.utcnow()}
+                "$set": {
+                    "updated_at": current_time,
+                    "values": {
+                        **current_values,
+                        "messages": current_messages
+                    }
+                }
             }
         )
         
         if result.modified_count > 0:
             # Get updated thread
-            thread_dict = await self.threads.find_one({"thread_id": thread_id})
-            return Thread(**thread_dict)
+            return await self.get(thread_id)
         
         return None

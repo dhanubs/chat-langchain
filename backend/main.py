@@ -77,55 +77,6 @@ async def delete_thread(thread_id: str):
         raise HTTPException(status_code=404, detail="Thread not found")
     return {"status": "success"}
 
-@app.get("/threads/{thread_id}/state")
-async def get_thread_state(
-    thread_id: str,
-    subgraphs: bool = False
-):
-    """Get thread state"""
-    try:
-        return await thread_manager.get_state(thread_id, subgraphs=subgraphs)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-@app.post("/threads/{thread_id}/state/checkpoint")
-async def get_thread_state_checkpoint(
-    thread_id: str,
-    payload: ThreadStatePayload = Body(...)
-):
-    """Get thread state with checkpoint"""
-    try:
-        return await thread_manager.get_state(
-            thread_id,
-            checkpoint=payload.checkpoint,
-            subgraphs=payload.subgraphs
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-@app.post("/threads/{thread_id}/state")
-async def update_thread_state(
-    thread_id: str,
-    payload: ThreadStateUpdatePayload = Body(...)
-):
-    """Update thread state"""
-    return await thread_manager.update_state(
-        thread_id,
-        values=payload.values,
-        checkpoint_id=payload.checkpoint_id,
-        checkpoint=payload.checkpoint,
-        as_node=payload.as_node
-    )
-
-@app.patch("/threads/{thread_id}/state")
-async def patch_thread_state(
-    thread_id: str,
-    metadata: Dict = Body(...)
-):
-    """Patch thread state metadata"""
-    await thread_manager.patch_state(thread_id, metadata)
-    return {"status": "success"}
-
 @app.post("/threads/{thread_id}/history")
 async def get_thread_history(
     thread_id: str,
@@ -170,7 +121,7 @@ async def chat(thread_id: str, message: str):
     # Generate complete response
     response = await chat_workflow.generate_response(message, thread_id)
     # Save the response
-    thread = await thread_manager.add_message(thread_id, "assistant", response)
+    thread = await thread_manager.add_message(thread_id, "ai", response)
     
     return {
         "thread_id": thread_id,
@@ -195,9 +146,9 @@ async def chat_stream(
     chat_history = []
     if payload.include_history:
         chat_history = [
-            {"role": msg.role, "content": msg.content} 
+            {"role": msg["type"], "content": msg["content"]} 
             for msg in thread.messages
-            if msg.role in ["human", "assistant"]
+            if msg["type"] in ["human", "assistant"]
         ]
     
     async def generate_events():
@@ -206,7 +157,8 @@ async def chat_stream(
             async for chunk in chat_workflow.stream_response(
                 input=payload.input,
                 thread_id=thread_id,
-                chat_history=chat_history if payload.include_history else None
+                chat_history=chat_history if payload.include_history else None,
+                config=thread.values.get("config")  # Pass any config from thread values
             ):
                 full_response += chunk
                 yield f"data: {json.dumps({'event': 'message', 'data': {'content': chunk}})}\n\n"
@@ -282,7 +234,7 @@ async def chat_playground(
                     yield f"data: {json.dumps({'chunk': chunk})}\n\n"
                 
                 # Save the complete response
-                await thread_manager.add_message(thread_id, "assistant", full_response)
+                await thread_manager.add_message(thread_id, "ai", full_response)
                 yield f"data: [DONE]\n\n"
             except Exception as e:
                 logger.error(f"Playground error: {str(e)}")
@@ -301,7 +253,7 @@ async def chat_playground(
                 chat_history=thread.messages,
                 config=request.config
             )
-            await thread_manager.add_message(thread_id, "assistant", response)
+            await thread_manager.add_message(thread_id, "ai", response)
             return {"response": response}
         except Exception as e:
             logger.error(f"Playground error: {str(e)}")
