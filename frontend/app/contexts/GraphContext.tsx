@@ -150,7 +150,7 @@ export function GraphProvider({ children }: { children: ReactNode }) {
 
     const input = {
       messages: params.messages?.filter((msg) => {
-        if (msg.role !== "assistant") {
+        if (msg.role !== "ai") {
           return true;
         }
         const aiMsg = msg as AIMessage;
