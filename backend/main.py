@@ -1,15 +1,11 @@
-from fastapi import FastAPI, HTTPException, Body, Request, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.responses import StreamingResponse
 from backend.chat_workflow import ChatWorkflow
-from backend.models import ChatInput, ChatRequest, ThreadCreatePayload, ThreadHistoryPayload, ThreadSearchPayload, ThreadStatePayload, ThreadStateUpdatePayload, ThreadStatus, Thread, ThreadState, Checkpoint, ThreadUpdatePayload
+from backend.models import ChatInput, ChatRequest, ThreadCreatePayload, ThreadHistoryPayload, ThreadSearchPayload, ThreadUpdatePayload
 from backend.thread_manager import ThreadManager
-from typing import Optional, Dict, List
 import os
 import json
-from pydantic import BaseModel, Field
 import logging
-from uuid import uuid4
-from datetime import datetime
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -158,7 +154,7 @@ async def chat_stream(
                 input=payload.input,
                 thread_id=thread_id,
                 chat_history=chat_history if payload.include_history else None,
-                config=thread.values.get("config")  # Pass any config from thread values
+                config=payload.config  # Use config from payload instead of thread.values
             ):
                 full_response += chunk
                 yield f"data: {json.dumps({'event': 'message', 'data': {'content': chunk}})}\n\n"

@@ -14,6 +14,7 @@ class Message(BaseModel):
 class ChatInput(BaseModel):
     input: str
     include_history: bool = False
+    config: Optional[Dict[str, Any]] = None
 
 class ChatRequest(BaseModel):
     message: str
