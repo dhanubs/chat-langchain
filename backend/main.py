@@ -144,7 +144,7 @@ async def chat_stream(
         chat_history = [
             {"role": msg["type"], "content": msg["content"]} 
             for msg in thread.messages
-            if msg["type"] in ["human", "assistant"]
+            if msg["type"] in ["human", "ai"]
         ]
     
     async def generate_events():
@@ -160,7 +160,7 @@ async def chat_stream(
                 yield f"data: {json.dumps({'event': 'message', 'data': {'content': chunk}})}\n\n"
             
             # Save the complete response
-            await thread_manager.add_message(thread_id, "assistant", full_response)
+            await thread_manager.add_message(thread_id, "ai", full_response)
             yield f"data: {json.dumps({'event': 'end', 'data': None})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'event': 'error', 'data': {'error': str(e)}})}\n\n"

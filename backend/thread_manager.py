@@ -193,7 +193,7 @@ class ThreadManager:
         
         Args:
             thread_id: ID of the thread
-            role: Role of the message sender ('human' or 'assistant')
+            role: Role of the message sender ('human' or 'ai')
             content: Content of the message
             
         Returns:

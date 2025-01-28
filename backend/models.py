@@ -114,7 +114,7 @@ class ThreadChatMessageHistory(BaseChatMessageHistory):
         """Return messages in LangChain format (sync)"""
         if self._messages is None and self.thread and self.thread.values:
             self._messages = [
-                AIMessage(content=msg["content"]) if msg["type"] == "assistant" 
+                AIMessage(content=msg["content"]) if msg["type"] == "ai" 
                 else HumanMessage(content=msg["content"])
                 for msg in self.thread.messages
             ]
