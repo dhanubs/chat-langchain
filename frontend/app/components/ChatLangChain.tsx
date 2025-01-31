@@ -1,19 +1,13 @@
-"use client";
-
 import React, { useState } from "react";
 import {
   AppendMessage,
   AssistantRuntimeProvider,
   useExternalStoreRuntime,
 } from "@assistant-ui/react";
-import { v4 as uuidv4 } from "uuid";
 import { useExternalMessageConverter } from "@assistant-ui/react";
-import { BaseMessage, HumanMessage } from "@langchain/core/messages";
+import { BaseMessage } from "@langchain/core/messages";
 import { useToast } from "../hooks/use-toast";
-import {
-  convertToOpenAIFormat,
-  convertLangchainMessages,
-} from "../utils/convert_messages";
+import { convertLangchainMessages } from "../utils/convert_messages";
 import { ThreadChat } from "./chat-interface";
 import { SelectModel } from "./SelectModel";
 import { ThreadHistory } from "./thread-history";
@@ -25,7 +19,7 @@ function ChatLangChainComponent(): React.ReactElement {
   const { threadsData, userData, graphData } = useGraphContext();
   const { userId } = userData;
   const { getUserThreads, threadId: currentThread } = threadsData;
-  const { messages, setMessages, handleUserMessage } = graphData;
+  const { messages, handleUserMessage } = graphData;
   const [isRunning, setIsRunning] = useState(false);
 
   const isSubmitDisabled = !userId || !currentThread;

@@ -56,7 +56,7 @@ function ThreadHistoryComponent() {
     }
 
     clearMessages();
-    await createThread(userId);
+    await createThread(userId, { title: 'New Thread' });
     // Re-fetch threads so that the new thread shows up.
     await getUserThreads(userId);
   };

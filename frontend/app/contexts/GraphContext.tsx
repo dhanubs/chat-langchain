@@ -5,7 +5,6 @@ import {
   ReactNode,
   SetStateAction,
   useContext,
-  useEffect,
   useState,
 } from "react";
 import { AIMessage, BaseMessage, HumanMessage } from "@langchain/core/messages";
@@ -18,6 +17,7 @@ import { useRuns } from "../hooks/useRuns";
 import { useUser } from "../hooks/useUser";
 import { addDocumentLinks, createClient, nodeToStep } from "./utils";
 import { Thread } from "@langchain/langgraph-sdk";
+import { apiClient } from "../services/api";
 
 interface GraphData {
   messages: BaseMessage[];
@@ -92,23 +92,26 @@ export function GraphProvider({ children }: { children: ReactNode }) {
   };
 
   const handleUserMessage = async (input: string) => {
-    // Add the user's message first
+    if (!threadId) {
+      toast({
+        title: "Error",
+        description: "No active thread found",
+      });
+      return;
+    }
+
     setMessages(prev => [...prev, new HumanMessage({ content: input })]);
 
-    const response = await fetch(`/api/chat/${threadId}/stream`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ input }),
-    });
-
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-
-    if (!reader) return;
-
     try {
+      const stream = await apiClient.streamChat(threadId, input);
+      
+      if (!stream) {
+        throw new Error("Failed to get stream response");
+      }
+
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -120,20 +123,20 @@ export function GraphProvider({ children }: { children: ReactNode }) {
           if (line.startsWith('data: ')) {
             const data = JSON.parse(line.slice(5));
             if (data.event === 'message') {
-              // Handle the streaming chunk
               handleStreamingChunk(data.data.content);
             } else if (data.event === 'error') {
               console.error('Stream error:', data.data.error);
-              break;
-            } else if (data.event === 'end') {
-              // Handle completion
               break;
             }
           }
         }
       }
-    } finally {
-      reader.releaseLock();
+    } catch (error) {
+      console.error('Error in chat stream:', error);
+      toast({
+        title: "Error",
+        description: "Failed to process message",
+      });
     }
   };
 
@@ -758,10 +761,10 @@ export function GraphProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useGraphContext() {
+export const useGraphContext = () => {
   const context = useContext(GraphContext);
-  if (context === undefined) {
-    throw new Error("useGraphContext must be used within a GraphProvider");
+  if (!context) {
+    throw new Error('useGraphContext must be used within a GraphProvider');
   }
   return context;
-}
+};

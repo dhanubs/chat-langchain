@@ -6,7 +6,7 @@ import { type FC } from "react";
 import { SendHorizontalIcon } from "lucide-react";
 import { BaseMessage } from "@langchain/core/messages";
 import { TooltipIconButton } from "../ui/assistant-ui/tooltip-icon-button";
-import { cn } from "@/app/utils/cn";
+import { cn } from "../../utils/cn";
 
 export interface ChatComposerProps {
   messages: BaseMessage[];
