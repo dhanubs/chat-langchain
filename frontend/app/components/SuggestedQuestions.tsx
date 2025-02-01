@@ -24,9 +24,9 @@ export function SuggestedQuestions() {
         <Card
           onClick={() => handleSend(question)}
           key={`suggested-question-${idx}`}
-          className="w-full bg-[#282828] border-gray-600 cursor-pointer transition-colors ease-in hover:bg-[#2b2b2b]"
+          className="w-full bg-theme-gray border-theme-gray cursor-pointer transition-colors ease-in hover:bg-theme-gray"
         >
-          <CardTitle className="p-4 text-gray-200 font-normal text-sm">
+          <CardTitle className="p-4 text-theme-gray font-normal text-sm">
             {question}
           </CardTitle>
         </Card>

@@ -16,30 +16,30 @@ export function Thread(props: ThreadProps) {
 
   return (
     <div
-      className="flex flex-row gap-0 items-center justify-start w-full"
+      className="flex flex-row items-center justify-between w-full px-1 py-0.5 group"
       onMouseEnter={() => setIsHovering(true)}
       onMouseLeave={() => setIsHovering(false)}
     >
       <Button
-        className="px-2 hover:bg-[#393939] hover:text-white justify-start items-center flex-grow min-w-[191px] pr-0"
+        className="hover:bg-theme-gray text-theme-gray justify-start items-center flex-grow mr-1 max-w-[calc(100%-40px)] overflow-hidden"
         size="sm"
         variant="ghost"
         onClick={props.onClick}
       >
-        <p className="truncate text-sm font-light w-full text-left">
+        <p className="truncate text-sm font-light w-full text-left text-theme-gray" title={props.label}>
           {props.label}
         </p>
       </Button>
-      {isHovering && (
+      <div className={`flex-shrink-0 transition-opacity duration-200 ${isHovering ? 'opacity-100' : 'opacity-0'}`}>
         <TooltipIconButton
           tooltip="Delete thread"
           variant="ghost"
-          className="hover:bg-[#373737] flex-shrink-0 p-2"
+          className="hover:bg-red-500/10 dark:hover:bg-red-500/20"
           onClick={props.onDelete}
         >
-          <Trash2 className="w-4 h-4 text-[#575757] hover:text-red-500 transition-colors ease-in" />
+          <Trash2 className="w-4 h-4 text-red-500 dark:text-red-400" />
         </TooltipIconButton>
-      )}
+      </div>
     </div>
   );
 }

@@ -68,7 +68,7 @@ function ChatLangChainComponent(): React.ReactElement {
   return (
     <div className="overflow-hidden w-full flex md:flex-row flex-col relative">
       {messages.length > 0 ? (
-        <div className="absolute top-4 right-4 z-10">
+        <div className="absolute top-4 right-16 z-40">
           <SelectModel />
         </div>
       ) : null}
