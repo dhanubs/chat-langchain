@@ -8,6 +8,7 @@ export interface ThreadsListProps {
     lastSevenDays: ThreadProps[];
     older: ThreadProps[];
   };
+  currentThreadId?: string;
 }
 
 export function ThreadsList(props: ThreadsListProps) {
@@ -16,12 +17,16 @@ export function ThreadsList(props: ThreadsListProps) {
       {Object.entries(props.groupedThreads).map(([group, threads]) =>
         threads.length > 0 ? (
           <div key={group}>
-            <h3 className="text-sm font-medium text-theme-gray mb-1 pl-2">
+            <h3 className="text-sm font-medium text-theme-gray-muted mb-1 pl-2">
               {prettifyDateLabel(group)}
             </h3>
             <div className="flex flex-col gap-1">
               {threads.map((thread) => (
-                <Thread key={thread.id} {...thread} />
+                <Thread 
+                  key={thread.id} 
+                  {...thread} 
+                  isSelected={thread.id === props.currentThreadId}
+                />
               ))}
             </div>
           </div>

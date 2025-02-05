@@ -87,7 +87,10 @@ function ThreadHistoryComponent() {
                 ))}
               </div>
             ) : (
-              <ThreadsList groupedThreads={groupedThreads} />
+              <ThreadsList 
+                groupedThreads={groupedThreads} 
+                currentThreadId={threadId}
+              />
             )}
           </div>
         </div>
@@ -112,7 +115,10 @@ function ThreadHistoryComponent() {
                 ))}
               </div>
             ) : (
-              <ThreadsList groupedThreads={groupedThreads} />
+              <ThreadsList 
+                groupedThreads={groupedThreads} 
+                currentThreadId={threadId}
+              />
             )}
           </SheetContent>
         </Sheet>

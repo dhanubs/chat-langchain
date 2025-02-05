@@ -9,6 +9,7 @@ export interface ThreadProps {
   onDelete: () => void;
   label: string;
   createdAt: Date;
+  isSelected?: boolean;
 }
 
 export function Thread(props: ThreadProps) {
@@ -21,12 +22,16 @@ export function Thread(props: ThreadProps) {
       onMouseLeave={() => setIsHovering(false)}
     >
       <Button
-        className="hover:bg-theme-gray text-theme-gray justify-start items-center flex-grow mr-1 max-w-[calc(100%-40px)] overflow-hidden"
+        className={`hover:bg-theme-gray text-theme-gray-secondary hover:text-theme-gray justify-start items-center flex-grow mr-1 max-w-[calc(100%-40px)] overflow-hidden ${
+          props.isSelected ? 'bg-theme-gray text-theme-gray' : ''
+        }`}
         size="sm"
         variant="ghost"
         onClick={props.onClick}
       >
-        <p className="truncate text-sm font-light w-full text-left text-theme-gray" title={props.label}>
+        <p className={`truncate text-sm font-light w-full text-left ${
+          props.isSelected ? 'text-theme-gray' : 'text-theme-gray-secondary hover:text-theme-gray'
+        }`} title={props.label}>
           {props.label}
         </p>
       </Button>

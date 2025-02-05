@@ -26,6 +26,7 @@ export function useThreads(userId: string | undefined) {
   const searchOrCreateThread = async (userId: string, data: any) => {
     const threadIdCookie = getCookie(THREAD_ID_COOKIE_NAME);
     if (!threadIdCookie) {
+      // No thread ID in cookies, create new thread
       const thread = await createThread(userId, data);
       if (thread?.thread_id) {
         setThreadId(thread.thread_id);
@@ -34,21 +35,26 @@ export function useThreads(userId: string | undefined) {
       return thread;
     }
 
-    // Thread ID is in cookies
-    const thread = await getThreadById(threadIdCookie);
-    if (!thread.values) {
-      // No values = no activity. Can keep.
-      setThreadId(threadIdCookie);
-      return thread;
-    } else {
-      // Current thread has activity. Create a new thread.
-      const newThread = await createThread(userId, data);
-      if (newThread?.thread_id) {
-        setThreadId(newThread.thread_id);
-        setCookie(THREAD_ID_COOKIE_NAME, newThread.thread_id);
+    try {
+      // Thread ID exists in cookies, try to get it
+      const thread = await getThreadById(threadIdCookie);
+      if (thread) {
+        // Thread exists, use it regardless of activity
+        setThreadId(threadIdCookie);
+        return thread;
       }
-      return newThread;
+    } catch (error) {
+      // Thread not found or error, create new one
+      console.warn('Stored thread not found, creating new:', error);
     }
+
+    // Only create new thread if existing one wasn't found
+    const newThread = await createThread(userId, data);
+    if (newThread?.thread_id) {
+      setThreadId(newThread.thread_id);
+      setCookie(THREAD_ID_COOKIE_NAME, newThread.thread_id);
+    }
+    return newThread;
   };
 
   const createThread = async (userId: string, data: any) => {
