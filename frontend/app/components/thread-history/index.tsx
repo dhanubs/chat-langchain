@@ -6,7 +6,7 @@ import { Skeleton } from "../ui/skeleton";
 import React from "react";
 import { useGraphContext } from "../../contexts/GraphContext";
 import { groupThreads } from "./utils";
-import { ThreadsList } from "./thread-list";
+import { ThreadsList } from "./threads-list";
 
 const LoadingThread = () => <Skeleton className="w-full h-8 bg-theme-gray" />;
 

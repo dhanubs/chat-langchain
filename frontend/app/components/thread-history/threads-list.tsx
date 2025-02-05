@@ -1,4 +1,4 @@
-import { Thread, ThreadProps } from "./thread-item";
+import { Thread, ThreadProps } from "./thread";
 import { prettifyDateLabel } from "./utils";
 
 export interface ThreadsListProps {

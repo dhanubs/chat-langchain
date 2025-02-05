@@ -1,5 +1,5 @@
 import { Thread } from "@langchain/langgraph-sdk";
-import { ThreadProps } from "./thread-item";
+import { ThreadProps } from "./thread";
 import { subDays, isToday, isYesterday, isWithinInterval } from "date-fns";
 
 export function convertThreadActualToThreadProps(
