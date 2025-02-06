@@ -12,7 +12,7 @@ import { MarkdownText } from "../ui/assistant-ui/markdown-text";
 export const UserMessage: FC = () => {
   return (
     <MessagePrimitive.Root className="pt-2 sm:pt-4 flex w-full md:max-w-4xl md:mx-0 mx-auto max-w-[95%] md:py-4 py-2">
-      <div className="bg-inherit text-theme-gray break-words rounded-2xl sm:rounded-3xl pt-2 md:pt-2.5 mb-[-15px] sm:mb-[-25px] text-2xl sm:text-4xl font-light">
+      <div className="bg-inherit text-theme-gray break-words rounded-2xl sm:rounded-3xl pt-2 md:pt-2.5 mb-[-15px] sm:mb-[-25px] text-xl sm:text-3xl font-light">
         <MessagePrimitive.Content />
       </div>
     </MessagePrimitive.Root>

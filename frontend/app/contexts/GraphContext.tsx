@@ -85,7 +85,7 @@ export function GraphProvider({ children }: { children: ReactNode }) {
             ...msg,
             content: msg.content,
           }),
-          progressAIMessage,
+          // progressAIMessage,
         ];
       }
 
