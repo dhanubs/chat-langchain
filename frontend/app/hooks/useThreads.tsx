@@ -7,7 +7,10 @@ import { apiClient } from '../services/api';
 
 // export const runtime = "edge";
 
-export function useThreads(userId: string | undefined) {
+export function useThreads(
+  userId: string | undefined,
+  switchSelectedThread: (thread: Thread) => Promise<void>
+) {
   const { toast } = useToast();
   const [isUserThreadsLoading, setIsUserThreadsLoading] = useState(false);
   const [userThreads, setUserThreads] = useState<Thread[]>([]);
@@ -39,8 +42,9 @@ export function useThreads(userId: string | undefined) {
       // Thread ID exists in cookies, try to get it
       const thread = await getThreadById(threadIdCookie);
       if (thread) {
-        // Thread exists, use it regardless of activity
+        // Thread exists, use it and load its messages
         setThreadId(threadIdCookie);
+        await switchSelectedThread(thread);
         return thread;
       }
     } catch (error) {

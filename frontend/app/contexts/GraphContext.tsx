@@ -18,6 +18,8 @@ import { useUser } from "../hooks/useUser";
 import { addDocumentLinks, createClient, nodeToStep } from "./utils";
 import { Thread } from "@langchain/langgraph-sdk";
 import { apiClient } from "../services/api";
+import { setCookie } from "../utils/cookies";
+import { THREAD_ID_COOKIE_NAME } from "../utils/constants";
 
 interface GraphData {
   messages: BaseMessage[];
@@ -47,6 +49,107 @@ export interface GraphInput {
 
 export function GraphProvider({ children }: { children: ReactNode }) {
   const { userId } = useUser();
+  const [messages, setMessages] = useState<BaseMessage[]>([]);
+  const [selectedModel, setSelectedModel] =
+    useState<ModelOptions>("anthropic/claude-3-5-haiku-20241022");
+
+  const switchSelectedThread = async (thread: Thread) => {
+    setThreadId(thread.thread_id);
+    setCookie(THREAD_ID_COOKIE_NAME, thread.thread_id);
+    
+    if (!thread.values) {
+      setMessages([]);
+      return;
+    }
+    const threadValues = thread.values as Record<string, any>;
+
+    const actualMessages = (
+      threadValues.messages as Record<string, any>[]
+    ).flatMap((msg, index, array) => {
+      if (msg.type === "human") {
+        // insert progress bar afterwards
+        const progressAIMessage = new AIMessage({
+          id: uuidv4(),
+          content: "",
+          tool_calls: [
+            {
+              name: "progress",
+              args: {
+                step: 4, // Set to done.
+              },
+            },
+          ],
+        });
+        return [
+          new HumanMessage({
+            ...msg,
+            content: msg.content,
+          }),
+          progressAIMessage,
+        ];
+      }
+
+      if (msg.type === "ai") {
+        const isLastAiMessage =
+          index === array.length - 1 || array[index + 1].type === "human";
+        if (isLastAiMessage) {
+          const routerMessage = threadValues.router
+            ? new AIMessage({
+                content: "",
+                id: uuidv4(),
+                tool_calls: [
+                  {
+                    name: "router_logic",
+                    args: threadValues.router,
+                  },
+                ],
+              })
+            : undefined;
+          const selectedDocumentsAIMessage = threadValues.documents?.length
+            ? new AIMessage({
+                content: "",
+                id: uuidv4(),
+                tool_calls: [
+                  {
+                    name: "selected_documents",
+                    args: {
+                      documents: threadValues.documents,
+                    },
+                  },
+                ],
+              })
+            : undefined;
+          const answerHeaderToolMsg = new AIMessage({
+            content: "",
+            tool_calls: [
+              {
+                name: "answer_header",
+                args: {},
+              },
+            ],
+          });
+          return [
+            ...(routerMessage ? [routerMessage] : []),
+            ...(selectedDocumentsAIMessage ? [selectedDocumentsAIMessage] : []),
+            answerHeaderToolMsg,
+            new AIMessage({
+              ...msg,
+              content: msg.content,
+            }),
+          ];
+        }
+        return new AIMessage({
+          ...msg,
+          content: msg.content,
+        });
+      }
+
+      return []; // Return an empty array for any other message types
+    });
+
+    setMessages(actualMessages);
+  };
+
   const {
     isUserThreadsLoading,
     userThreads,
@@ -58,12 +161,10 @@ export function GraphProvider({ children }: { children: ReactNode }) {
     threadId,
     setThreadId,
     deleteThread,
-  } = useThreads(userId);
+  } = useThreads(userId, switchSelectedThread);
+  
   const { toast } = useToast();
   const { shareRun } = useRuns();
-  const [messages, setMessages] = useState<BaseMessage[]>([]);
-  const [selectedModel, setSelectedModel] =
-    useState<ModelOptions>("anthropic/claude-3-5-haiku-20241022");
 
   const handleStreamingChunk = (content: string) => {
     setMessages((prevMessages) => {
@@ -630,101 +731,6 @@ export function GraphProvider({ children }: { children: ReactNode }) {
         }
       });
     }
-  };
-
-  const switchSelectedThread = async (thread: Thread) => {
-    setThreadId(thread.thread_id);
-    if (!thread.values) {
-      setMessages([]);
-      return;
-    }
-    const threadValues = thread.values as Record<string, any>;
-
-    const actualMessages = (
-      threadValues.messages as Record<string, any>[]
-    ).flatMap((msg, index, array) => {
-      if (msg.type === "human") {
-        // insert progress bar afterwards
-        const progressAIMessage = new AIMessage({
-          id: uuidv4(),
-          content: "",
-          tool_calls: [
-            {
-              name: "progress",
-              args: {
-                step: 4, // Set to done.
-              },
-            },
-          ],
-        });
-        return [
-          new HumanMessage({
-            ...msg,
-            content: msg.content,
-          }),
-          progressAIMessage,
-        ];
-      }
-
-      if (msg.type === "ai") {
-        const isLastAiMessage =
-          index === array.length - 1 || array[index + 1].type === "human";
-        if (isLastAiMessage) {
-          const routerMessage = threadValues.router
-            ? new AIMessage({
-                content: "",
-                id: uuidv4(),
-                tool_calls: [
-                  {
-                    name: "router_logic",
-                    args: threadValues.router,
-                  },
-                ],
-              })
-            : undefined;
-          const selectedDocumentsAIMessage = threadValues.documents?.length
-            ? new AIMessage({
-                content: "",
-                id: uuidv4(),
-                tool_calls: [
-                  {
-                    name: "selected_documents",
-                    args: {
-                      documents: threadValues.documents,
-                    },
-                  },
-                ],
-              })
-            : undefined;
-          const answerHeaderToolMsg = new AIMessage({
-            content: "",
-            tool_calls: [
-              {
-                name: "answer_header",
-                args: {},
-              },
-            ],
-          });
-          return [
-            ...(routerMessage ? [routerMessage] : []),
-            ...(selectedDocumentsAIMessage ? [selectedDocumentsAIMessage] : []),
-            answerHeaderToolMsg,
-            new AIMessage({
-              ...msg,
-              content: msg.content,
-            }),
-          ];
-        }
-        return new AIMessage({
-          ...msg,
-          content: msg.content,
-        });
-      }
-
-      return []; // Return an empty array for any other message types
-    });
-
-    setMessages(actualMessages);
   };
 
   const contextValue: GraphContentType = {
