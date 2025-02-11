@@ -98,33 +98,39 @@ def create_chain(
     model: str = None,
     streaming: bool = False
 ) -> Any:
-    """Create a chat chain with message history"""
+    """Create a RAG chain with message history that strictly uses retrieved context"""
     
     # Initialize the language model
     llm = get_llm(provider, model, streaming)
     
-    # Create the prompt template with better context handling and chat history
+    # Create the prompt template with strict context adherence
     prompt = ChatPromptTemplate.from_messages([
-        ("system", """You are a helpful AI assistant. Answer questions based on the provided context and chat history.
-        If you don't know the answer or can't find it in the context, just say that you don't know.
-        
-        Remember to:
-        1. Use the context as your primary source of information
-        2. Consider the chat history for context
-        3. Be concise and direct in your answers
-        4. Cite specific parts of the context when relevant
-        
-        Previous conversation:
-        {chat_history}
-        
-        Context: {context}"""),
+        ("system", """You are a knowledgeable AI assistant whose primary role is to answer questions based STRICTLY on the provided context from documents. Your responses must be:
+
+1. STRICTLY based on the information present in the provided context
+2. Clear and direct, citing specific parts of the context when relevant
+3. Honest about limitations - if the answer isn't in the context, say so clearly
+4. Considerate of the chat history for contextual understanding
+
+DO NOT:
+- Make assumptions beyond the provided context
+- Add external knowledge not present in the documents
+- Try to be helpful by making up information
+
+If the context doesn't contain enough information to fully answer the question, say: "I cannot provide a complete answer based on the available context. The documents only mention [relevant partial information if any]."
+
+Previous conversation for context:
+{chat_history}
+
+Relevant document excerpts:
+{context}"""),
         ("human", "{question}")
     ])
     
-    # Create a simple chain that combines retrieval and response generation
+    # Create a chain that combines retrieval and response generation
     chain = (
         {
-            "context": retriever,
+            "context": lambda x: _format_docs(retriever.get_relevant_documents(x["question"])),
             "question": RunnablePassthrough(),
             "chat_history": lambda x: format_chat_history(x.get("chat_history", []))
         }
@@ -160,6 +166,13 @@ def format_chat_history(chat_history):
     return "\n".join(formatted_messages) if formatted_messages else "No previous conversation."
 
 def _format_docs(docs):
-    """Format documents into a string with citations."""
-    return "\n\n".join(f"Document [{i}]: {doc.page_content}" 
-                      for i, doc in enumerate(docs)) 
+    """Format documents into a string with clear section breaks and citations."""
+    if not docs:
+        return "No relevant documents found."
+    
+    formatted_docs = []
+    for i, doc in enumerate(docs, 1):
+        # Add clear section breaks and document numbers
+        formatted_docs.append(f"[Document {i}]\n{doc.page_content}\n")
+    
+    return "\n---\n".join(formatted_docs) 
