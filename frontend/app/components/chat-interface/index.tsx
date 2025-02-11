@@ -1,8 +1,6 @@
-"use client";
-
 import { ThreadPrimitive } from "@assistant-ui/react";
 import { type FC } from "react";
-import NextImage from "next/image";
+import { Image } from '../ui/Image';
 
 import { ArrowDownIcon } from "lucide-react";
 import { useAnswerHeaderToolUI } from "../AnswerHeaderToolUI";
@@ -15,7 +13,7 @@ import { SuggestedQuestions } from "../SuggestedQuestions";
 import { TooltipIconButton } from "../ui/assistant-ui/tooltip-icon-button";
 import { AssistantMessage, UserMessage } from "./messages";
 import { ChatComposer, ChatComposerProps } from "./chat-composer";
-import { cn } from "@/app/utils/cn";
+import { cn } from "../../utils/cn";
 
 export interface ThreadChatProps extends ChatComposerProps {}
 
@@ -54,13 +52,12 @@ export const ThreadChat: FC<ThreadChatProps> = (props: ThreadChatProps) => {
           <div className="flex flex-col items-center mx-4 md:mt-0 mt-24">
             <div className="flex flex-row gap-1 items-center justify-center">
               <p className="text-xl sm:text-2xl">Chat LangChain</p>
-              <NextImage
+              <Image
                 src="/images/lc_logo.jpg"
                 className="rounded-3xl"
                 alt="LangChain Logo"
                 width={32}
                 height={32}
-                style={{ width: "auto", height: "auto" }}
               />
             </div>
             <div className="mb-4 sm:mb-[24px] mt-1 sm:mt-2">

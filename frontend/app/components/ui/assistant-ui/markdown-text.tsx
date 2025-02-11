@@ -12,7 +12,7 @@ import { FC, memo, useState } from "react";
 import { CheckIcon, CopyIcon, ExternalLink } from "lucide-react";
 
 import { TooltipIconButton } from "./tooltip-icon-button";
-import { SyntaxHighlighter } from "./syntax-highlighter";
+import { CodeHighlighter } from "./syntax-highlighter";
 import { cn } from "../../../utils/cn";
 
 import "katex/dist/katex.min.css";
@@ -26,7 +26,7 @@ const MarkdownTextImpl = () => {
         h1: ({ node: _node, className, ...props }) => (
           <h1
             className={cn(
-              "mb-8 scroll-m-20 text-4xl font-extrabold tracking-tight last:mb-0",
+              "mb-8 scroll-m-20 text-4xl font-extrabold tracking-tight last:mb-0 text-theme-gray",
               className,
             )}
             {...props}
@@ -35,7 +35,7 @@ const MarkdownTextImpl = () => {
         h2: ({ node: _node, className, ...props }) => (
           <h2
             className={cn(
-              "mb-4 mt-8 scroll-m-20 text-3xl font-semibold tracking-tight first:mt-0 last:mb-0",
+              "mb-4 mt-8 scroll-m-20 text-3xl font-semibold tracking-tight first:mt-0 last:mb-0 text-theme-gray",
               className,
             )}
             {...props}
@@ -44,7 +44,7 @@ const MarkdownTextImpl = () => {
         h3: ({ node: _node, className, ...props }) => (
           <h3
             className={cn(
-              "mb-4 mt-6 scroll-m-20 text-2xl font-semibold tracking-tight first:mt-0 last:mb-0",
+              "mb-4 mt-6 scroll-m-20 text-2xl font-semibold tracking-tight first:mt-0 last:mb-0 text-theme-gray",
               className,
             )}
             {...props}
@@ -53,7 +53,7 @@ const MarkdownTextImpl = () => {
         h4: ({ node: _node, className, ...props }) => (
           <h4
             className={cn(
-              "mb-4 mt-6 scroll-m-20 text-xl font-semibold tracking-tight first:mt-0 last:mb-0",
+              "mb-4 mt-6 scroll-m-20 text-xl font-semibold tracking-tight first:mt-0 last:mb-0 text-theme-gray",
               className,
             )}
             {...props}
@@ -62,7 +62,7 @@ const MarkdownTextImpl = () => {
         h5: ({ node: _node, className, ...props }) => (
           <h5
             className={cn(
-              "my-4 text-lg font-semibold first:mt-0 last:mb-0",
+              "my-4 text-lg font-semibold first:mt-0 last:mb-0 text-theme-gray",
               className,
             )}
             {...props}
@@ -70,14 +70,14 @@ const MarkdownTextImpl = () => {
         ),
         h6: ({ node: _node, className, ...props }) => (
           <h6
-            className={cn("my-4 font-semibold first:mt-0 last:mb-0", className)}
+            className={cn("my-4 font-semibold first:mt-0 last:mb-0 text-theme-gray", className)}
             {...props}
           />
         ),
         p: ({ node: _node, className, ...props }) => (
           <p
             className={cn(
-              "mb-5 mt-5 leading-7 first:mt-0 last:mb-0",
+              "mb-5 mt-5 leading-7 first:mt-0 last:mb-0 text-theme-gray",
               className,
             )}
             {...props}
@@ -98,29 +98,29 @@ const MarkdownTextImpl = () => {
         ),
         blockquote: ({ node: _node, className, ...props }) => (
           <blockquote
-            className={cn("border-l-2 pl-6 italic", className)}
+            className={cn("border-l-2 pl-6 italic text-theme-gray border-theme-gray", className)}
             {...props}
           />
         ),
         ul: ({ node: _node, className, ...props }) => (
           <ul
-            className={cn("my-5 ml-6 list-disc [&>li]:mt-2", className)}
+            className={cn("my-5 ml-6 list-disc [&>li]:mt-2 text-theme-gray", className)}
             {...props}
           />
         ),
         ol: ({ node: _node, className, ...props }) => (
           <ol
-            className={cn("my-5 ml-6 list-decimal [&>li]:mt-2", className)}
+            className={cn("my-5 ml-6 list-decimal [&>li]:mt-2 text-theme-gray", className)}
             {...props}
           />
         ),
         hr: ({ node: _node, className, ...props }) => (
-          <hr className={cn("my-5 border-b", className)} {...props} />
+          <hr className={cn("my-5 border-theme-gray", className)} {...props} />
         ),
         table: ({ node: _node, className, ...props }) => (
           <table
             className={cn(
-              "my-5 w-full border-separate border-spacing-0 overflow-y-auto",
+              "my-5 w-full border-separate border-spacing-0 overflow-y-auto text-theme-gray",
               className,
             )}
             {...props}
@@ -129,7 +129,7 @@ const MarkdownTextImpl = () => {
         th: ({ node: _node, className, ...props }) => (
           <th
             className={cn(
-              "bg-muted px-4 py-2 text-left font-bold first:rounded-tl-lg last:rounded-tr-lg [&[align=center]]:text-center [&[align=right]]:text-right",
+              "bg-theme-gray px-4 py-2 text-left font-bold first:rounded-tl-lg last:rounded-tr-lg [&[align=center]]:text-center [&[align=right]]:text-right",
               className,
             )}
             {...props}
@@ -138,7 +138,7 @@ const MarkdownTextImpl = () => {
         td: ({ node: _node, className, ...props }) => (
           <td
             className={cn(
-              "border-b border-l px-4 py-2 text-left last:border-r [&[align=center]]:text-center [&[align=right]]:text-right",
+              "border-b border-l border-theme-gray px-4 py-2 text-left last:border-r [&[align=center]]:text-center [&[align=right]]:text-right",
               className,
             )}
             {...props}
@@ -147,7 +147,7 @@ const MarkdownTextImpl = () => {
         tr: ({ node: _node, className, ...props }) => (
           <tr
             className={cn(
-              "m-0 border-b p-0 first:border-t [&:last-child>td:first-child]:rounded-bl-lg [&:last-child>td:last-child]:rounded-br-lg",
+              "m-0 border-b border-theme-gray p-0 first:border-t [&:last-child>td:first-child]:rounded-bl-lg [&:last-child>td:last-child]:rounded-br-lg",
               className,
             )}
             {...props}
@@ -159,29 +159,44 @@ const MarkdownTextImpl = () => {
             {...props}
           />
         ),
-        pre: ({ node: _node, className, ...props }) => (
-          <pre
-            className={cn(
-              "overflow-x-auto rounded-b-lg bg-black p-4 text-white",
-              className,
-            )}
-            {...props}
-          />
-        ),
-        code: function Code({ node: _node, className, ...props }) {
-          const isCodeBlock = useIsMarkdownCodeBlock();
+        pre: ({ node: _node, className, ...props }) => {
           return (
-            <code
+            <pre
               className={cn(
-                !isCodeBlock && "bg-aui-muted rounded border font-semibold",
+                "overflow-x-auto rounded-lg bg-transparent",
                 className,
               )}
               {...props}
             />
           );
         },
+        code: function Code({ node: _node, className, ...props }) {
+          const isCodeBlock = useIsMarkdownCodeBlock();
+          // console.log('Code component:', { isCodeBlock, className, props });
+          
+          const language = className?.split('-')[1] || 'text';
+
+          if (isCodeBlock) {
+            return (
+              <div className="my-4">
+                <CodeHighlighter language={language}>
+                  {(props as any).children}
+                </CodeHighlighter>
+              </div>
+            );
+          }
+
+          return (
+            <code
+              className={cn(
+                "bg-theme-gray rounded border border-theme-gray font-semibold text-theme-gray px-1.5 py-0.5",
+                className
+              )}
+              {...props}
+            />
+          );
+        },
         CodeHeader,
-        SyntaxHighlighter,
       }}
     />
   );
@@ -197,11 +212,11 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
   };
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-t-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">
+    <div className="flex items-center justify-between gap-4 rounded-t-lg bg-theme-gray px-4 py-2 text-sm font-semibold text-theme-gray">
       <span className="lowercase [&>span]:text-xs">{language}</span>
       <TooltipIconButton tooltip="Copy" onClick={onCopy}>
-        {!isCopied && <CopyIcon />}
-        {isCopied && <CheckIcon />}
+        {!isCopied && <CopyIcon className="text-theme-gray" />}
+        {isCopied && <CheckIcon className="text-theme-gray" />}
       </TooltipIconButton>
     </div>
   );

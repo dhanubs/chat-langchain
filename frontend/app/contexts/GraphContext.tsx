@@ -5,7 +5,6 @@ import {
   ReactNode,
   SetStateAction,
   useContext,
-  useEffect,
   useState,
 } from "react";
 import { AIMessage, BaseMessage, HumanMessage } from "@langchain/core/messages";
@@ -18,6 +17,9 @@ import { useRuns } from "../hooks/useRuns";
 import { useUser } from "../hooks/useUser";
 import { addDocumentLinks, createClient, nodeToStep } from "./utils";
 import { Thread } from "@langchain/langgraph-sdk";
+import { apiClient } from "../services/api";
+import { setCookie } from "../utils/cookies";
+import { THREAD_ID_COOKIE_NAME } from "../utils/constants";
 
 interface GraphData {
   messages: BaseMessage[];
@@ -47,6 +49,107 @@ export interface GraphInput {
 
 export function GraphProvider({ children }: { children: ReactNode }) {
   const { userId } = useUser();
+  const [messages, setMessages] = useState<BaseMessage[]>([]);
+  const [selectedModel, setSelectedModel] =
+    useState<ModelOptions>("anthropic/claude-3-5-haiku-20241022");
+
+  const switchSelectedThread = async (thread: Thread) => {
+    setThreadId(thread.thread_id);
+    setCookie(THREAD_ID_COOKIE_NAME, thread.thread_id);
+    
+    if (!thread.values) {
+      setMessages([]);
+      return;
+    }
+    const threadValues = thread.values as Record<string, any>;
+
+    const actualMessages = (
+      threadValues.messages as Record<string, any>[]
+    ).flatMap((msg, index, array) => {
+      if (msg.type === "human") {
+        // insert progress bar afterwards
+        const progressAIMessage = new AIMessage({
+          id: uuidv4(),
+          content: "",
+          tool_calls: [
+            {
+              name: "progress",
+              args: {
+                step: 4, // Set to done.
+              },
+            },
+          ],
+        });
+        return [
+          new HumanMessage({
+            ...msg,
+            content: msg.content,
+          }),
+          // progressAIMessage,
+        ];
+      }
+
+      if (msg.type === "ai") {
+        const isLastAiMessage =
+          index === array.length - 1 || array[index + 1].type === "human";
+        if (isLastAiMessage) {
+          const routerMessage = threadValues.router
+            ? new AIMessage({
+                content: "",
+                id: uuidv4(),
+                tool_calls: [
+                  {
+                    name: "router_logic",
+                    args: threadValues.router,
+                  },
+                ],
+              })
+            : undefined;
+          const selectedDocumentsAIMessage = threadValues.documents?.length
+            ? new AIMessage({
+                content: "",
+                id: uuidv4(),
+                tool_calls: [
+                  {
+                    name: "selected_documents",
+                    args: {
+                      documents: threadValues.documents,
+                    },
+                  },
+                ],
+              })
+            : undefined;
+          const answerHeaderToolMsg = new AIMessage({
+            content: "",
+            tool_calls: [
+              {
+                name: "answer_header",
+                args: {},
+              },
+            ],
+          });
+          return [
+            ...(routerMessage ? [routerMessage] : []),
+            ...(selectedDocumentsAIMessage ? [selectedDocumentsAIMessage] : []),
+            answerHeaderToolMsg,
+            new AIMessage({
+              ...msg,
+              content: msg.content,
+            }),
+          ];
+        }
+        return new AIMessage({
+          ...msg,
+          content: msg.content,
+        });
+      }
+
+      return []; // Return an empty array for any other message types
+    });
+
+    setMessages(actualMessages);
+  };
+
   const {
     isUserThreadsLoading,
     userThreads,
@@ -58,12 +161,10 @@ export function GraphProvider({ children }: { children: ReactNode }) {
     threadId,
     setThreadId,
     deleteThread,
-  } = useThreads(userId);
+  } = useThreads(userId, switchSelectedThread);
+  
   const { toast } = useToast();
   const { shareRun } = useRuns();
-  const [messages, setMessages] = useState<BaseMessage[]>([]);
-  const [selectedModel, setSelectedModel] =
-    useState<ModelOptions>("anthropic/claude-3-5-haiku-20241022");
 
   const handleStreamingChunk = (content: string) => {
     setMessages((prevMessages) => {
@@ -92,23 +193,26 @@ export function GraphProvider({ children }: { children: ReactNode }) {
   };
 
   const handleUserMessage = async (input: string) => {
-    // Add the user's message first
+    if (!threadId) {
+      toast({
+        title: "Error",
+        description: "No active thread found",
+      });
+      return;
+    }
+
     setMessages(prev => [...prev, new HumanMessage({ content: input })]);
 
-    const response = await fetch(`/api/chat/${threadId}/stream`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ input }),
-    });
-
-    const reader = response.body?.getReader();
-    const decoder = new TextDecoder();
-
-    if (!reader) return;
-
     try {
+      const stream = await apiClient.streamChat(threadId, input);
+      
+      if (!stream) {
+        throw new Error("Failed to get stream response");
+      }
+
+      const reader = stream.getReader();
+      const decoder = new TextDecoder();
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
@@ -120,20 +224,20 @@ export function GraphProvider({ children }: { children: ReactNode }) {
           if (line.startsWith('data: ')) {
             const data = JSON.parse(line.slice(5));
             if (data.event === 'message') {
-              // Handle the streaming chunk
               handleStreamingChunk(data.data.content);
             } else if (data.event === 'error') {
               console.error('Stream error:', data.data.error);
-              break;
-            } else if (data.event === 'end') {
-              // Handle completion
               break;
             }
           }
         }
       }
-    } finally {
-      reader.releaseLock();
+    } catch (error) {
+      console.error('Error in chat stream:', error);
+      toast({
+        title: "Error",
+        description: "Failed to process message",
+      });
     }
   };
 
@@ -629,101 +733,6 @@ export function GraphProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const switchSelectedThread = async (thread: Thread) => {
-    setThreadId(thread.thread_id);
-    if (!thread.values) {
-      setMessages([]);
-      return;
-    }
-    const threadValues = thread.values as Record<string, any>;
-
-    const actualMessages = (
-      threadValues.messages as Record<string, any>[]
-    ).flatMap((msg, index, array) => {
-      if (msg.type === "human") {
-        // insert progress bar afterwards
-        const progressAIMessage = new AIMessage({
-          id: uuidv4(),
-          content: "",
-          tool_calls: [
-            {
-              name: "progress",
-              args: {
-                step: 4, // Set to done.
-              },
-            },
-          ],
-        });
-        return [
-          new HumanMessage({
-            ...msg,
-            content: msg.content,
-          }),
-          progressAIMessage,
-        ];
-      }
-
-      if (msg.type === "ai") {
-        const isLastAiMessage =
-          index === array.length - 1 || array[index + 1].type === "human";
-        if (isLastAiMessage) {
-          const routerMessage = threadValues.router
-            ? new AIMessage({
-                content: "",
-                id: uuidv4(),
-                tool_calls: [
-                  {
-                    name: "router_logic",
-                    args: threadValues.router,
-                  },
-                ],
-              })
-            : undefined;
-          const selectedDocumentsAIMessage = threadValues.documents?.length
-            ? new AIMessage({
-                content: "",
-                id: uuidv4(),
-                tool_calls: [
-                  {
-                    name: "selected_documents",
-                    args: {
-                      documents: threadValues.documents,
-                    },
-                  },
-                ],
-              })
-            : undefined;
-          const answerHeaderToolMsg = new AIMessage({
-            content: "",
-            tool_calls: [
-              {
-                name: "answer_header",
-                args: {},
-              },
-            ],
-          });
-          return [
-            ...(routerMessage ? [routerMessage] : []),
-            ...(selectedDocumentsAIMessage ? [selectedDocumentsAIMessage] : []),
-            answerHeaderToolMsg,
-            new AIMessage({
-              ...msg,
-              content: msg.content,
-            }),
-          ];
-        }
-        return new AIMessage({
-          ...msg,
-          content: msg.content,
-        });
-      }
-
-      return []; // Return an empty array for any other message types
-    });
-
-    setMessages(actualMessages);
-  };
-
   const contextValue: GraphContentType = {
     userData: {
       userId,
@@ -758,10 +767,10 @@ export function GraphProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useGraphContext() {
+export const useGraphContext = () => {
   const context = useContext(GraphContext);
-  if (context === undefined) {
-    throw new Error("useGraphContext must be used within a GraphProvider");
+  if (!context) {
+    throw new Error('useGraphContext must be used within a GraphProvider');
   }
   return context;
-}
+};

@@ -1,20 +1,16 @@
 import { useEffect, useState } from "react";
-
-import { Client, Thread } from "@langchain/langgraph-sdk";
+import { Thread } from "@langchain/langgraph-sdk";
 import { getCookie, setCookie } from "../utils/cookies";
 import { useToast } from "./use-toast";
 import { THREAD_ID_COOKIE_NAME } from "../utils/constants";
+import { apiClient } from '../services/api';
 
 // export const runtime = "edge";
 
-export const createClient = () => {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000/api";
-  return new Client({
-    apiUrl,
-  });
-};
-
-export function useThreads(userId: string | undefined) {
+export function useThreads(
+  userId: string | undefined,
+  switchSelectedThread: (thread: Thread) => Promise<void>
+) {
   const { toast } = useToast();
   const [isUserThreadsLoading, setIsUserThreadsLoading] = useState(false);
   const [userThreads, setUserThreads] = useState<Thread[]>([]);
@@ -27,58 +23,66 @@ export function useThreads(userId: string | undefined) {
 
   useEffect(() => {
     if (threadId || typeof window === "undefined" || !userId) return;
-    searchOrCreateThread(userId);
+    searchOrCreateThread(userId, { title: 'New Thread' });
   }, [userId]);
 
-  const searchOrCreateThread = async (id: string) => {
+  const searchOrCreateThread = async (userId: string, data: any) => {
     const threadIdCookie = getCookie(THREAD_ID_COOKIE_NAME);
     if (!threadIdCookie) {
-      await createThread(id);
-      return;
+      // No thread ID in cookies, create new thread
+      const thread = await createThread(userId, data);
+      if (thread?.thread_id) {
+        setThreadId(thread.thread_id);
+        setCookie(THREAD_ID_COOKIE_NAME, thread.thread_id);
+      }
+      return thread;
     }
-    // Thread ID is in cookies.
 
-    const thread = await getThreadById(threadIdCookie);
-    if (!thread.values) {
-      // No values = no activity. Can keep.
-      setThreadId(threadIdCookie);
-      return;
-    } else {
-      // Current thread has activity. Create a new thread.
-      await createThread(id);
-      return;
+    try {
+      // Thread ID exists in cookies, try to get it
+      const thread = await getThreadById(threadIdCookie);
+      if (thread) {
+        // Thread exists, use it and load its messages
+        setThreadId(threadIdCookie);
+        await switchSelectedThread(thread);
+        return thread;
+      }
+    } catch (error) {
+      // Thread not found or error, create new one
+      console.warn('Stored thread not found, creating new:', error);
     }
+
+    // Only create new thread if existing one wasn't found
+    const newThread = await createThread(userId, data);
+    if (newThread?.thread_id) {
+      setThreadId(newThread.thread_id);
+      setCookie(THREAD_ID_COOKIE_NAME, newThread.thread_id);
+    }
+    return newThread;
   };
 
-  const createThread = async (id: string) => {
-    const client = createClient();
-    let thread;
-    try {
-      thread = await client.threads.create({
-        metadata: {
-          user_id: id,
-        },
-      });
+  const createThread = async (userId: string, data: any) => {
+    try {      
+      const thread = await apiClient.createThread(userId, data);
       if (!thread || !thread.thread_id) {
         throw new Error("Thread creation failed.");
       }
-      setThreadId(thread.thread_id);
-      setCookie(THREAD_ID_COOKIE_NAME, thread.thread_id);
+      return thread;
     } catch (e) {
       console.error("Error creating thread", e);
       toast({
         title: "Error creating thread.",
       });
+      throw e;
     }
-    return thread;
   };
 
   const getUserThreads = async (id: string) => {
     setIsUserThreadsLoading(true);
     try {
-      const client = createClient();
+      const client = apiClient;
 
-      const userThreads = (await client.threads.search({
+      const userThreads = (await client.searchThreads({
         metadata: {
           user_id: id,
         },
@@ -99,8 +103,8 @@ export function useThreads(userId: string | undefined) {
   };
 
   const getThreadById = async (id: string) => {
-    const client = createClient();
-    return (await client.threads.get(id)) as Awaited<Thread>;
+    const client = apiClient;
+    return (await client.getThreadById(id)) as Awaited<Thread>;
   };
 
   const deleteThread = async (id: string, clearMessages: () => void) => {
@@ -117,12 +121,12 @@ export function useThreads(userId: string | undefined) {
       clearMessages();
       // Create a new thread. Use .then to avoid blocking the UI.
       // Once completed re-fetch threads to update UI.
-      createThread(userId).then(async () => {
+      searchOrCreateThread(userId, { title: 'New Thread' }).then(async () => {
         await getUserThreads(userId);
       });
     }
-    const client = createClient();
-    await client.threads.delete(id);
+    const client = apiClient;
+    await client.deleteThread(id);
   };
 
   return {

@@ -3,6 +3,7 @@
 @tailwind utilities;
 
 body {
+  font-family: 'Inter', sans-serif;
   color: #f8f8f8;
   background: #131318;
   max-height: 100vh;
@@ -55,12 +56,19 @@ li {
     --border: 0 0% 89.8%;
     --input: 0 0% 89.8%;
     --ring: 0 0% 3.9%;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
     --radius: 0.5rem;
+
+    /* Custom theme colors */
+    --theme-gray-50: 220 17% 96%;
+    --theme-gray-100: 220 13% 91%;
+    --theme-gray-200: 220 13% 85%;
+    --theme-gray-300: 216 12% 84%;
+    --theme-gray-400: 217 10% 65%;
+    --theme-gray-500: 220 9% 46%;
+    --theme-gray-600: 215 14% 34%;
+    --theme-gray-700: 217 19% 27%;
+    --theme-gray-800: 215 28% 17%;
+    --theme-gray-900: 221 39% 11%;
   }
   .dark {
     --background: 0 0% 3.9%;
@@ -96,5 +104,36 @@ li {
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/* Custom utility classes for theme colors */
+@layer utilities {
+  .text-theme-gray {
+    color: hsl(var(--theme-gray-700));
+  }
+  .dark .text-theme-gray {
+    color: hsl(var(--theme-gray-300));
+  }
+  
+  .bg-theme-gray {
+    background-color: hsl(var(--theme-gray-50));
+  }
+  .dark .bg-theme-gray {
+    background-color: hsl(var(--theme-gray-800));
+  }
+  
+  .border-theme-gray {
+    border-color: hsl(var(--theme-gray-200));
+  }
+  .dark .border-theme-gray {
+    border-color: hsl(var(--theme-gray-600));
+  }
+  
+  .hover\:bg-theme-gray:hover {
+    background-color: hsl(var(--theme-gray-100));
+  }
+  .dark .hover\:bg-theme-gray:hover {
+    background-color: hsl(var(--theme-gray-700));
   }
 }

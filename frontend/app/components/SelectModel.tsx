@@ -26,12 +26,12 @@ export function SelectModelComponent() {
       value={selectedModel}
       defaultValue="anthropic/claude-3-5-haiku-20241022"
     >
-      <SelectTrigger className="w-[180px] border-gray-600 text-gray-200">
+      <SelectTrigger className="w-[180px] border-theme-gray text-theme-gray">
         <SelectValue placeholder="Model" />
       </SelectTrigger>
-      <SelectContent className="bg-[#282828] text-gray-200 border-gray-600">
+      <SelectContent className="bg-theme-gray text-theme-gray border-theme-gray">
         {Object.entries(modelOptionsAndLabels).map(([model, label]) => (
-          <SelectItem className="hover:bg-[#2b2b2b]" key={model} value={model}>
+          <SelectItem className="hover:bg-theme-gray" key={model} value={model}>
             {label}
           </SelectItem>
         ))}

@@ -6,7 +6,7 @@ import { type FC } from "react";
 import { SendHorizontalIcon } from "lucide-react";
 import { BaseMessage } from "@langchain/core/messages";
 import { TooltipIconButton } from "../ui/assistant-ui/tooltip-icon-button";
-import { cn } from "@/app/utils/cn";
+import { cn } from "../../utils/cn";
 
 export interface ChatComposerProps {
   messages: BaseMessage[];
@@ -35,7 +35,8 @@ export const ChatComposer: FC<ChatComposerProps> = (
   return (
     <ComposerPrimitive.Root
       className={cn(
-        "focus-within:border-aui-ring/20 flex w-full items-center md:justify-left justify-center rounded-lg border px-2.5 py-2.5 shadow-sm transition-all duration-300 ease-in-out bg-[#282828] border-gray-600",
+        "focus-within:border-aui-ring/20 flex w-full items-center md:justify-left justify-center rounded-lg border px-2.5 py-2.5 shadow-sm transition-all duration-300 ease-in-out",
+        "bg-theme-gray border-theme-gray",
         isEmpty ? "" : "md:ml-24 ml-3 mb-6",
         isEmpty ? "w-full" : "md:w-[70%] w-[95%] md:max-w-[832px]",
       )}
@@ -44,7 +45,7 @@ export const ChatComposer: FC<ChatComposerProps> = (
         autoFocus
         placeholder="How can I..."
         rows={1}
-        className="placeholder:text-gray-400 text-gray-100 max-h-40 flex-1 resize-none border-none bg-transparent px-2 py-2 text-sm outline-none focus:ring-0 disabled:cursor-not-allowed"
+        className="text-theme-gray placeholder:text-theme-gray max-h-40 flex-1 resize-none border-none bg-transparent px-2 py-2 text-sm outline-none focus:ring-0 disabled:cursor-not-allowed"
       />
       <div className="flex-shrink-0">
         <ThreadPrimitive.If running={false} disabled={props.submitDisabled}>
@@ -52,7 +53,7 @@ export const ChatComposer: FC<ChatComposerProps> = (
             <TooltipIconButton
               tooltip="Send"
               variant="default"
-              className="my-1 size-8 p-2 transition-opacity ease-in"
+              className="my-1 size-8 p-2 transition-opacity ease-in text-theme-gray"
             >
               <SendHorizontalIcon />
             </TooltipIconButton>
@@ -63,7 +64,7 @@ export const ChatComposer: FC<ChatComposerProps> = (
             <TooltipIconButton
               tooltip="Cancel"
               variant="default"
-              className="my-1 size-8 p-2 transition-opacity ease-in"
+              className="my-1 size-8 p-2 transition-opacity ease-in text-theme-gray"
             >
               <CircleStopIcon />
             </TooltipIconButton>

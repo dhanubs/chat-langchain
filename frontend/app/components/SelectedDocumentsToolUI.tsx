@@ -35,7 +35,7 @@ export const useSelectedDocumentsUI = () =>
 
       return (
         <div className="flex flex-col mb-4">
-          <span className="flex flex-row gap-2 items-center justify-start pb-4 text-gray-300">
+          <span className="flex flex-row gap-2 items-center justify-start pb-4 text-theme-gray">
             <BookOpenText className="w-5 h-5" />
             <p className="text-xl">Selected Context</p>
           </span>
@@ -50,16 +50,16 @@ export const useSelectedDocumentsUI = () =>
             {remainingDocuments.length > 0 && (
               <Sheet>
                 <SheetTrigger>
-                  <div className="flex items-center border-[1px] border-gray-500 justify-center w-[40px] h-[110px] bg-[#282828] hover:bg-[#2b2b2b] rounded-md cursor-pointer transition-colors duration-200">
-                    <Plus className="w-6 h-6 text-gray-300" />
+                  <div className="flex items-center border-[1px] border-theme-gray justify-center w-[40px] h-[110px] bg-theme-gray hover:bg-theme-gray rounded-md cursor-pointer transition-colors duration-200">
+                    <Plus className="w-6 h-6 text-theme-gray" />
                   </div>
                 </SheetTrigger>
                 <SheetContent
                   side="right"
-                  className="bg-[#282828] border-none overflow-y-auto flex-grow scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent md:min-w-[50vw] min-w-[70vw]"
+                  className="bg-theme-gray border-none overflow-y-auto flex-grow scrollbar-thin scrollbar-thumb-gray-600 scrollbar-track-transparent md:min-w-[50vw] min-w-[70vw]"
                 >
                   <div className="flex flex-col gap-4">
-                    <h2 className="text-xl font-semibold text-gray-300">
+                    <h2 className="text-xl font-semibold text-theme-gray">
                       All Selected Documents
                     </h2>
                     <div className="flex flex-wrap gap-2">
