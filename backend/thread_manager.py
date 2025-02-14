@@ -236,3 +236,75 @@ class ThreadManager:
             return await self.get(thread_id)
         
         return None
+
+    async def get_history(
+        self,
+        thread_id: str,
+        limit: int = 10,
+        before: Optional[Dict] = None,
+        checkpoint: Optional[Dict] = None,
+        metadata: Optional[Dict] = None
+    ) -> List[Dict]:
+        """
+        Get thread history with pagination and filtering.
+        
+        Args:
+            thread_id: ID of the thread to get history for
+            limit: Maximum number of messages to return
+            before: Optional message to paginate before (based on updated_at)
+            checkpoint: Optional checkpoint to filter messages
+            metadata: Optional metadata filters for messages
+            
+        Returns:
+            List of messages from thread history
+        """
+        # Get the thread
+        thread = await self.get(thread_id)
+        if not thread:
+            raise ValueError(f"Thread {thread_id} not found")
+            
+        # Get messages from thread
+        messages = thread.messages
+        
+        # Apply filters
+        filtered_messages = messages
+        
+        # Filter by before timestamp if provided
+        if before and "updated_at" in before:
+            before_time = before["updated_at"]
+            filtered_messages = [
+                msg for msg in filtered_messages 
+                if msg["updated_at"] < before_time
+            ]
+            
+        # Filter by metadata if provided
+        if metadata:
+            filtered_messages = [
+                msg for msg in filtered_messages
+                if all(
+                    msg.get(key) == value 
+                    for key, value in metadata.items()
+                )
+            ]
+            
+        # Filter by checkpoint if provided
+        if checkpoint:
+            checkpoint_id = checkpoint.get("checkpoint_id")
+            if checkpoint_id:
+                # Find messages after checkpoint
+                try:
+                    checkpoint_index = next(
+                        i for i, msg in enumerate(filtered_messages)
+                        if msg.get("checkpoint_id") == checkpoint_id
+                    )
+                    filtered_messages = filtered_messages[checkpoint_index + 1:]
+                except StopIteration:
+                    # Checkpoint not found, return empty list
+                    return []
+        
+        # Sort by updated_at descending and apply limit
+        filtered_messages.sort(
+            key=lambda x: x["updated_at"],
+            reverse=True
+        )
+        return filtered_messages[:limit]
