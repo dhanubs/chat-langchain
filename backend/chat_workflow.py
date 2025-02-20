@@ -3,9 +3,11 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from typing import AsyncIterator, Dict, Any, List, Optional
-import os
 from backend.chain import create_chain, get_retriever
 from backend.thread_manager import ThreadManager
+from langchain_openai import AzureOpenAIEmbeddings
+from backend.config import settings
+from langchain_community.retrievers import AzureAISearchRetriever
 
 class ChatWorkflow:
     def __init__(self, provider: str = "azure", model: str = "gpt-35-turbo-16k", thread_manager: ThreadManager = None):
@@ -13,7 +15,16 @@ class ChatWorkflow:
         self.default_model = model
         self.current_model = model  # Track current model
         self.thread_manager = thread_manager
-        self.retriever = get_retriever()
+        
+        # Initialize Azure AI Search retriever
+        self.retriever = AzureAISearchRetriever(
+            service_name=settings.azure_search_service_name,
+            api_key=settings.azure_search_key,
+            index_name=settings.azure_search_index_name,
+            content_key="content",
+            top_k=3
+        )
+        
         self.chain = create_chain(
             retriever=self.retriever,
             thread_manager=thread_manager,
@@ -161,4 +172,4 @@ class ChatWorkflow:
         
         if isinstance(result, dict):
             return result.get("output", "")
-        return str(result) 
+        return str(result)

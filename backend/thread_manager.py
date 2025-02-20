@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import MongoClient
 from datetime import datetime
@@ -65,7 +65,7 @@ class ThreadManager:
         
         await self.threads.update_one(
             {"thread_id": thread.thread_id},
-            {"$set": thread.dict()},
+            {"$set": thread.model_dump()},
             upsert=True
         )
         return thread
@@ -236,3 +236,64 @@ class ThreadManager:
             return await self.get(thread_id)
         
         return None
+
+    async def get_history(
+        self,
+        thread_id: str,
+        limit: int = 20,
+        before: Optional[str] = None,
+        checkpoint: Optional[str] = None,
+        metadata: Optional[Dict] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get message history for a thread with filtering options.
+        
+        Args:
+            thread_id: ID of the thread
+            limit: Maximum number of messages to return
+            before: Return messages before this timestamp
+            checkpoint: Return messages before this checkpoint
+            metadata: Additional metadata filters
+            
+        Returns:
+            List of message dictionaries
+        """
+        # Match thread and metadata if provided
+        match_query = {"thread_id": thread_id}
+        if metadata:
+            for key, value in metadata.items():
+                match_query[f"metadata.{key}"] = value
+
+        pipeline = [
+            {"$match": match_query},
+            {"$project": {
+                "messages": "$values.messages",
+            }},
+            {"$unwind": "$messages"},
+        ]
+
+        # Add filters if provided
+        if before:
+            pipeline.append({
+                "$match": {"messages.updated_at": {"$lt": before}}
+            })
+        
+        if checkpoint:
+            pipeline.append({
+                "$match": {"messages.updated_at": {"$lt": checkpoint}}
+            })
+
+        # Sort and limit results
+        pipeline.extend([
+            {"$sort": {"messages.updated_at": -1}},
+            {"$limit": limit}
+        ])
+
+        # Get only message content
+        pipeline.append({
+            "$replaceRoot": {"newRoot": "$messages"}
+        })
+
+        cursor = self.threads.aggregate(pipeline)
+        messages = await cursor.to_list(length=None)
+        return messages

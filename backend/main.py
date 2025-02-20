@@ -1,12 +1,15 @@
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, UploadFile, File
 from fastapi.responses import StreamingResponse
 from backend.chat_workflow import ChatWorkflow
 from backend.models import ChatInput, ChatRequest, ThreadCreatePayload, ThreadHistoryPayload, ThreadSearchPayload, ThreadUpdatePayload
 from backend.thread_manager import ThreadManager
+from pathlib import Path
+from backend.ingest import ingest_pdfs
 import os
 import json
 import logging
 from fastapi.middleware.cors import CORSMiddleware
+from backend.config import settings
 
 app = FastAPI()
 
@@ -20,11 +23,10 @@ app.add_middleware(
 )
 
 # Initialize managers
-MONGO_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
-thread_manager = ThreadManager(MONGO_URI)
+thread_manager = ThreadManager(settings.mongodb_uri)
 chat_workflow = ChatWorkflow(
-    provider=os.getenv("LLM_PROVIDER", "azure"),
-    model=os.getenv("LLM_MODEL", "gpt-35-turbo-16k"),
+    provider=settings.llm_provider,
+    model=settings.llm_model,
     thread_manager=thread_manager
 )
 
@@ -254,3 +256,30 @@ async def chat_playground(
         except Exception as e:
             logger.error(f"Playground error: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ingest/pdfs")
+async def ingest_pdf_documents(
+    folder_path: str,
+    recursive: bool = True,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200
+):
+    """
+    Ingest PDF documents from a specified folder into Azure AI Search.
+    
+    Args:
+        folder_path: Path to folder containing PDFs
+        recursive: Whether to search subdirectories
+        chunk_size: Size of text chunks for splitting
+        chunk_overlap: Overlap between chunks
+    """
+    try:
+        await ingest_pdfs(
+            folder_path,
+            recursive=recursive,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap
+        )
+        return {"status": "success", "message": "PDFs ingested successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

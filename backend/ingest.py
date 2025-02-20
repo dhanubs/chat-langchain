@@ -1,4 +1,5 @@
 """Load html from files, clean up, split, ingest into Weaviate."""
+from datetime import datetime
 import logging
 import os
 import re
@@ -7,18 +8,18 @@ from pathlib import Path
 
 import weaviate
 from bs4 import BeautifulSoup, SoupStrainer
-from langchain.document_loaders import RecursiveUrlLoader, SitemapLoader
 from langchain.indexes import SQLRecordManager, index
 from langchain.utils.html import PREFIXES_TO_IGNORE_REGEX, SUFFIXES_TO_IGNORE_REGEX
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_weaviate import WeaviateVectorStore
 from langchain_openai import AzureOpenAIEmbeddings
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader, RecursiveUrlLoader, SitemapLoader
 from langchain_community.vectorstores.azuresearch import AzureSearch
 
 from backend.constants import WEAVIATE_DOCS_INDEX_NAME
 from backend.embeddings import get_embeddings_model
 from backend.parser import langchain_docs_extractor
+from backend.config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -196,20 +197,34 @@ def ingest_docs():
         )
 
 
-def ingest_pdfs(pdf_dir: str, recursive: bool = True) -> None:
-    """Ingest PDFs from a directory into Azure AI Search."""
+async def ingest_pdfs(
+    pdf_dir: str,
+    recursive: bool = True,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200
+) -> None:
+    """
+    Ingest PDFs from a directory into Azure AI Search.
     
+    Args:
+        pdf_dir: Directory containing PDFs
+        recursive: Whether to search subdirectories
+        chunk_size: Size of text chunks for splitting
+        chunk_overlap: Overlap between chunks
+    """
     # Initialize Azure OpenAI embeddings
     embeddings = AzureOpenAIEmbeddings(
-        azure_deployment="your-embedding-deployment",  # e.g., "text-embedding-ada-002"
-        openai_api_version="2024-02-15-preview",
+        azure_deployment=settings.azure_openai_embedding_deployment,
+        azure_endpoint=settings.azure_openai_endpoint,
+        api_key=settings.azure_openai_api_key,
+        api_version=settings.azure_openai_api_version
     )
     
     # Initialize Azure AI Search
     vector_store = AzureSearch(
-        azure_search_endpoint="your-search-endpoint",
-        azure_search_key="your-search-key",
-        index_name="your-index-name",
+        azure_search_endpoint=settings.azure_search_service_endpoint,
+        azure_search_key=settings.azure_search_admin_key,
+        index_name=settings.azure_search_index_name,
         embedding_function=embeddings,
     )
     
@@ -223,13 +238,25 @@ def ingest_pdfs(pdf_dir: str, recursive: bool = True) -> None:
         
         # Split documents
         text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000,
-            chunk_overlap=200,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            separators=["\n\n", "\n", " ", ""],
+            length_function=len
         )
         splits = text_splitter.split_documents(documents)
         
+        # Add metadata
+        for split in splits:
+            split.metadata.update({
+                "source": str(pdf_path.name),
+                "file_path": str(pdf_path),
+                "chunk_size": chunk_size,
+                "chunk_overlap": chunk_overlap,
+                "created_at": datetime.utcnow().isoformat()
+            })
+        
         # Add to vector store
-        vector_store.add_documents(splits)
+        await vector_store.aadd_documents(splits)
 
 
 if __name__ == "__main__":
