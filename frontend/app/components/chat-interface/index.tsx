@@ -88,9 +88,9 @@ const ThreadChatScrollToBottom: FC = () => {
       <TooltipIconButton
         tooltip="Scroll to bottom"
         variant="outline"
-        className="absolute bottom-28 left-1/2 transform -translate-x-1/2 rounded-full disabled:invisible bg-white bg-opacity-75"
+        className="absolute bottom-28 left-1/2 transform -translate-x-1/2 rounded-full disabled:invisible bg-white dark:bg-gray-800 bg-opacity-75 hover:bg-opacity-100 transition-all duration-200"
       >
-        <ArrowDownIcon className="text-gray-600 hover:text-gray-800 transition-colors ease-in-out" />
+        <ArrowDownIcon className="w-6 h-6 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors duration-200" />
       </TooltipIconButton>
     </ThreadPrimitive.ScrollToBottom>
   );
