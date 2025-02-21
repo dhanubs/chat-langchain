@@ -5,24 +5,35 @@ from datetime import datetime
 import uuid
 from backend.models import Thread
 from backend.enums import OnConflictBehavior, ThreadStatus
+from urllib.parse import urlparse
 
 class ThreadManager:
-    def __init__(self, mongo_uri: str, database_name: str = "chatapp"):
+    def __init__(self, mongo_uri: str):
         """Initialize ThreadManager with both async and sync clients.
-        
-        We need both clients because:
-        1. The main FastAPI application uses async operations for better performance
-        2. However, LangChain's RunnableWithMessageHistory expects a synchronous 
-           get_session_history function and cannot handle async operations
-        3. Attempting to run async code synchronously inside an async context 
-           (like FastAPI) leads to event loop conflicts
-        4. Using pymongo's synchronous client is the cleanest solution to avoid 
-           these event loop issues while maintaining compatibility with LangChain
+        Database name is extracted from URI if present, otherwise defaults to 'chatapp'
         """
+        # Create temporary client to parse URI and get database name
+        temp_client = MongoClient(mongo_uri)
+        try:
+            # Get database name from URI or use default
+            database_name = temp_client.get_database().name
+        except Exception:
+            database_name = "chatapp"
+        finally:
+            temp_client.close()
+        
+        # We need both clients because:
+        # 1. The main FastAPI application uses async operations for better performance
+        # 2. However, LangChain's RunnableWithMessageHistory expects a synchronous 
+        #    get_session_history function and cannot handle async operations
+        # 3. Attempting to run async code synchronously inside an async context 
+        #    (like FastAPI) leads to event loop conflicts
+        # 4. Using pymongo's synchronous client is the cleanest solution to avoid 
+        #    these event loop issues while maintaining compatibility with LangChain
+           
         # Async client for main operations
         self.client = AsyncIOMotorClient(mongo_uri)
-        self.db = self.client[database_name]
-        self.threads = self.db.threads
+        self.threads = self.client[database_name].threads
         
         # Sync client specifically for LangChain compatibility
         self.sync_client = MongoClient(mongo_uri)

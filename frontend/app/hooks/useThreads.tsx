@@ -34,6 +34,7 @@ export function useThreads(
       if (thread?.thread_id) {
         setThreadId(thread.thread_id);
         setCookie(THREAD_ID_COOKIE_NAME, thread.thread_id);
+        await switchSelectedThread(thread);
       }
       return thread;
     }
@@ -57,6 +58,7 @@ export function useThreads(
     if (newThread?.thread_id) {
       setThreadId(newThread.thread_id);
       setCookie(THREAD_ID_COOKIE_NAME, newThread.thread_id);
+      await switchSelectedThread(newThread);
     }
     return newThread;
   };
@@ -90,12 +92,19 @@ export function useThreads(
       })) as Awaited<Thread[]>;
 
       if (userThreads.length > 0) {
-        const lastInArray = userThreads[0];
-        const allButLast = userThreads.slice(1, userThreads.length);
-        const filteredThreads = allButLast.filter(
-          (thread) => thread.values && Object.keys(thread.values).length > 0,
+        // Sort threads by creation time, newest first
+        const sortedThreads = userThreads.sort((a, b) => {
+          const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
+          const timeB = b.created_at ? new Date(b.created_at).getTime() : 0;
+          return timeB - timeA;
+        });
+
+        // Filter out threads with no values
+        const filteredThreads = sortedThreads.filter(
+          (thread) => thread.values && Object.keys(thread.values).length > 0
         );
-        setUserThreads([...filteredThreads, lastInArray]);
+
+        setUserThreads(filteredThreads);
       }
     } finally {
       setIsUserThreadsLoading(false);
@@ -111,22 +120,32 @@ export function useThreads(
     if (!userId) {
       throw new Error("User ID not found");
     }
+    
+    // First delete from the API
+    const client = apiClient;
+    await client.deleteThread(id);
+
+    // Update local state
     setUserThreads((prevThreads) => {
       const newThreads = prevThreads.filter(
         (thread) => thread.thread_id !== id,
       );
       return newThreads;
     });
+
+    // If this was the current thread, clear messages and handle new state
     if (id === threadId) {
       clearMessages();
-      // Create a new thread. Use .then to avoid blocking the UI.
-      // Once completed re-fetch threads to update UI.
-      searchOrCreateThread(userId, { title: 'New Thread' }).then(async () => {
+      setThreadId(undefined); // Clear the current thread ID
+      
+      // Create a new thread and select it
+      searchOrCreateThread(userId, { title: 'New Thread' }).then(async (newThread) => {
+        if (newThread) {
+          await switchSelectedThread(newThread);
+        }
         await getUserThreads(userId);
       });
     }
-    const client = apiClient;
-    await client.deleteThread(id);
   };
 
   return {
