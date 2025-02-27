@@ -265,7 +265,9 @@ async def ingest_documents(
     recursive: bool = True,
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
-    file_extensions: Optional[List[str]] = None
+    file_extensions: Optional[List[str]] = None,
+    parallel: bool = True,
+    max_concurrency: int = 5
 ) -> Dict[str, Any]:
     """
     Ingest multiple document types from a directory into Azure AI Search using Docling.
@@ -276,6 +278,8 @@ async def ingest_documents(
         chunk_size: Size of text chunks for splitting
         chunk_overlap: Overlap between chunks
         file_extensions: List of file extensions to process (if None, process all supported types)
+        parallel: Whether to process files in parallel
+        max_concurrency: Maximum number of files to process concurrently
         
     Returns:
         Dict: Processing statistics
@@ -283,14 +287,16 @@ async def ingest_documents(
     # Initialize document processor
     processor = DocumentProcessor(
         chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap
+        chunk_overlap=chunk_overlap,
+        max_concurrency=max_concurrency
     )
     
     # Process all documents in the directory
     return await processor.process_directory(
         directory_path=directory_path,
         recursive=recursive,
-        file_extensions=file_extensions
+        file_extensions=file_extensions,
+        parallel=parallel
     )
 
 

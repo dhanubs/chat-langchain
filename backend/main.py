@@ -11,6 +11,7 @@ import logging
 from typing import List, Optional
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
+from backend.document_processor import DocumentProcessor
 
 app = FastAPI()
 
@@ -291,7 +292,9 @@ async def ingest_document_folder(
     recursive: bool = True,
     chunk_size: int = 1000,
     chunk_overlap: int = 200,
-    file_extensions: Optional[List[str]] = None
+    file_extensions: Optional[List[str]] = None,
+    parallel: bool = True,
+    max_concurrency: int = 5
 ):
     """
     Ingest multiple document types from a specified folder into Azure AI Search.
@@ -302,15 +305,25 @@ async def ingest_document_folder(
         chunk_size: Size of text chunks for splitting
         chunk_overlap: Overlap between chunks
         file_extensions: List of file extensions to process (if None, process all supported types)
+        parallel: Whether to process files in parallel
+        max_concurrency: Maximum number of files to process concurrently
     """
     try:
-        stats = await ingest_documents(
-            directory_path=folder_path,
-            recursive=recursive,
+        # Initialize document processor with concurrency settings
+        processor = DocumentProcessor(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            file_extensions=file_extensions
+            max_concurrency=max_concurrency
         )
+        
+        # Process all documents in the directory
+        stats = await processor.process_directory(
+            directory_path=folder_path,
+            recursive=recursive,
+            file_extensions=file_extensions,
+            parallel=parallel
+        )
+        
         return {
             "status": "success", 
             "message": "Documents ingested successfully",
@@ -367,7 +380,9 @@ async def upload_document(
 async def upload_multiple_documents(
     files: List[UploadFile] = File(...),
     chunk_size: int = Form(1000),
-    chunk_overlap: int = Form(200)
+    chunk_overlap: int = Form(200),
+    parallel: bool = Form(True),
+    max_concurrency: int = Form(5)
 ):
     """
     Upload and process multiple document files.
@@ -376,45 +391,66 @@ async def upload_multiple_documents(
         files: List of uploaded files
         chunk_size: Size of text chunks for splitting
         chunk_overlap: Overlap between chunks
+        parallel: Whether to process files in parallel
+        max_concurrency: Maximum number of files to process concurrently
     """
-    results = []
-    
-    for file in files:
-        try:
+    try:
+        # Initialize document processor with concurrency settings
+        processor = DocumentProcessor(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            max_concurrency=max_concurrency
+        )
+        
+        # Prepare file data
+        file_data_list = []
+        for file in files:
             # Read file content
             file_content = await file.read()
-            
-            # Process the uploaded file
-            stats = await process_uploaded_document(
-                file_content=file_content,
-                filename=file.filename,
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap
+            file_data_list.append({
+                'content': file_content,
+                'filename': file.filename
+            })
+        
+        if parallel and len(files) > 1:
+            # Process files in parallel
+            results = await processor.process_uploaded_files_parallel(file_data_list)
+        else:
+            # Process files sequentially
+            results = []
+            for file_data in file_data_list:
+                result = await processor.process_uploaded_file(
+                    file_content=file_data['content'],
+                    filename=file_data['filename']
+                )
+                results.append(result)
+        
+        # Format results
+        formatted_results = []
+        for result in results:
+            formatted_results.append({
+                "filename": result.get("filename", ""),
+                "success": result.get("success", False),
+                "chunks": result.get("chunks", 0),
+                "error": result.get("error", None)
+            })
+        
+        # Check if any files were processed successfully
+        if not any(result["success"] for result in formatted_results):
+            raise HTTPException(
+                status_code=422,
+                detail="Failed to process any of the uploaded files"
             )
-            
-            results.append({
-                "filename": file.filename,
-                "success": stats.get("success", False),
-                "chunks": stats.get("chunks", 0),
-                "error": stats.get("error", None)
-            })
-            
-        except Exception as e:
-            results.append({
-                "filename": file.filename,
-                "success": False,
-                "error": str(e)
-            })
-    
-    # Check if any files were processed successfully
-    if not any(result["success"] for result in results):
-        raise HTTPException(
-            status_code=422,
-            detail="Failed to process any of the uploaded files"
-        )
-    
-    return {
-        "status": "success",
-        "message": f"Processed {sum(1 for r in results if r['success'])} of {len(results)} files successfully",
-        "results": results
-    }
+        
+        return {
+            "status": "success",
+            "message": f"Processed {sum(1 for r in formatted_results if r['success'])} of {len(formatted_results)} files successfully",
+            "parallel_processing": parallel and len(files) > 1,
+            "max_concurrency": max_concurrency if parallel and len(files) > 1 else 1,
+            "results": formatted_results
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing uploaded documents: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

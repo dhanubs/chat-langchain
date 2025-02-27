@@ -5,6 +5,7 @@ Supports PDF, DOCX, PPTX, TXT, and other document formats.
 
 import os
 import logging
+import asyncio
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union
@@ -47,6 +48,7 @@ class DocumentProcessor:
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
         separators: List[str] = None,
+        max_concurrency: int = 5,
     ):
         """
         Initialize the document processor.
@@ -55,10 +57,12 @@ class DocumentProcessor:
             chunk_size: Size of text chunks for splitting
             chunk_overlap: Overlap between chunks
             separators: Custom separators for text splitting
+            max_concurrency: Maximum number of files to process concurrently
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.separators = separators or ["\n\n", "\n", " ", ""]
+        self.max_concurrency = max_concurrency
         
         # Initialize Azure OpenAI embeddings
         self.embeddings = AzureOpenAIEmbeddings(
@@ -148,11 +152,70 @@ class DocumentProcessor:
             logger.error(f"Error processing file {file_path}: {str(e)}")
             return []
     
+    async def process_file_async(self, file_path: Union[str, Path]) -> Dict[str, Any]:
+        """
+        Process a single file asynchronously and return processing results.
+        
+        Args:
+            file_path: Path to the file
+            
+        Returns:
+            Dict: Processing results including documents and statistics
+        """
+        try:
+            # Skip unsupported files
+            if not self.is_supported_file(file_path):
+                return {
+                    "file_path": str(file_path),
+                    "success": False,
+                    "documents": [],
+                    "error": "Unsupported file type"
+                }
+            
+            # Process the file
+            documents = self.process_file(file_path)
+            
+            if documents:
+                # Add to vector store
+                await self.vector_store.aadd_documents(documents)
+                
+                # Get file type
+                file_type = SUPPORTED_EXTENSIONS.get(Path(file_path).suffix.lower(), "Unknown")
+                
+                logger.info(f"Processed {Path(file_path).name}: {len(documents)} chunks")
+                
+                return {
+                    "file_path": str(file_path),
+                    "success": True,
+                    "documents": documents,
+                    "chunks": len(documents),
+                    "file_type": file_type
+                }
+            else:
+                logger.warning(f"No content extracted from {Path(file_path).name}")
+                return {
+                    "file_path": str(file_path),
+                    "success": False,
+                    "documents": [],
+                    "error": "No content extracted"
+                }
+        
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Failed to process {Path(file_path).name}: {error_msg}")
+            return {
+                "file_path": str(file_path),
+                "success": False,
+                "documents": [],
+                "error": error_msg
+            }
+    
     async def process_directory(
         self,
         directory_path: Union[str, Path],
         recursive: bool = True,
         file_extensions: Optional[List[str]] = None,
+        parallel: bool = True,
     ) -> Dict[str, Any]:
         """
         Process all supported files in a directory.
@@ -161,6 +224,7 @@ class DocumentProcessor:
             directory_path: Path to the directory
             recursive: Whether to search subdirectories
             file_extensions: List of file extensions to process (if None, process all supported types)
+            parallel: Whether to process files in parallel
             
         Returns:
             Dict: Processing statistics
@@ -189,42 +253,49 @@ class DocumentProcessor:
             "failed_files": 0,
             "total_chunks": 0,
             "file_types": {},
+            "parallel_processing": parallel,
+            "max_concurrency": self.max_concurrency if parallel else 1,
         }
         
-        # Process each file
-        for file_path in all_files:
-            try:
-                # Skip unsupported files
-                if not self.is_supported_file(file_path):
-                    continue
-                
-                # Process the file
-                documents = self.process_file(file_path)
-                
-                if documents:
-                    # Add to vector store
-                    await self.vector_store.aadd_documents(documents)
-                    
-                    # Update statistics
-                    stats["processed_files"] += 1
-                    stats["total_chunks"] += len(documents)
-                    
-                    # Update file type statistics
-                    file_type = SUPPORTED_EXTENSIONS.get(file_path.suffix.lower(), "Unknown")
-                    if file_type not in stats["file_types"]:
-                        stats["file_types"][file_type] = 0
-                    stats["file_types"][file_type] += 1
-                    
-                    logger.info(f"Processed {file_path.name}: {len(documents)} chunks")
-                else:
-                    stats["failed_files"] += 1
-                    logger.warning(f"No content extracted from {file_path.name}")
+        if not parallel:
+            # Process files sequentially
+            for file_path in all_files:
+                result = await self.process_file_async(file_path)
+                self._update_stats(stats, result)
+        else:
+            # Process files in parallel with controlled concurrency
+            # Split files into batches to control memory usage
+            batches = [all_files[i:i + self.max_concurrency] for i in range(0, len(all_files), self.max_concurrency)]
             
-            except Exception as e:
-                stats["failed_files"] += 1
-                logger.error(f"Failed to process {file_path.name}: {str(e)}")
+            for batch in batches:
+                # Process batch concurrently
+                results = await asyncio.gather(*[self.process_file_async(file_path) for file_path in batch])
+                
+                # Update statistics
+                for result in results:
+                    self._update_stats(stats, result)
         
         return stats
+    
+    def _update_stats(self, stats: Dict[str, Any], result: Dict[str, Any]) -> None:
+        """
+        Update processing statistics with file processing result.
+        
+        Args:
+            stats: Statistics dictionary to update
+            result: File processing result
+        """
+        if result.get("success", False):
+            stats["processed_files"] += 1
+            stats["total_chunks"] += result.get("chunks", 0)
+            
+            # Update file type statistics
+            file_type = result.get("file_type", "Unknown")
+            if file_type not in stats["file_types"]:
+                stats["file_types"][file_type] = 0
+            stats["file_types"][file_type] += 1
+        else:
+            stats["failed_files"] += 1
     
     async def process_uploaded_file(self, file_content: bytes, filename: str) -> Dict[str, Any]:
         """
@@ -277,4 +348,38 @@ class DocumentProcessor:
         finally:
             # Clean up the temporary file
             if file_path.exists():
-                file_path.unlink() 
+                file_path.unlink()
+    
+    async def process_uploaded_files_parallel(
+        self, 
+        files: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Process multiple uploaded files in parallel.
+        
+        Args:
+            files: List of dictionaries containing file content and filename
+                  Each dict should have 'content' and 'filename' keys
+            
+        Returns:
+            List[Dict]: Processing results for each file
+        """
+        # Process files in parallel with controlled concurrency
+        # Split files into batches to control memory usage
+        batches = [files[i:i + self.max_concurrency] for i in range(0, len(files), self.max_concurrency)]
+        
+        all_results = []
+        
+        for batch in batches:
+            # Process batch concurrently
+            batch_results = await asyncio.gather(*[
+                self.process_uploaded_file(
+                    file_content=file_data['content'],
+                    filename=file_data['filename']
+                ) 
+                for file_data in batch
+            ])
+            
+            all_results.extend(batch_results)
+        
+        return all_results 
