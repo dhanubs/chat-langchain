@@ -15,7 +15,7 @@ from typing import List, Optional, Dict, Any, Union, Tuple
 # Suppress docling deprecation warning
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="docling_core")
 
-from docling.document_converter import DocumentConverter as DoclingDocument
+from docling.document_converter import DocumentConverter
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores.azuresearch import AzureSearch
@@ -222,7 +222,7 @@ class DocumentProcessor:
         
         try:
             # Use Docling to extract text and metadata
-            docling_doc = DoclingDocument.from_file(file_path)
+            docling_doc = DocumentConverter.convert(file_path)
             
             # Extract content using Docling's structured parsing
             content_parts = []
