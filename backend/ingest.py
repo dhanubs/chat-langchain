@@ -13,7 +13,7 @@ from langchain.utils.html import PREFIXES_TO_IGNORE_REGEX, SUFFIXES_TO_IGNORE_RE
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_weaviate import WeaviateVectorStore
 from langchain_openai import AzureOpenAIEmbeddings
-from langchain_community.document_loaders import PyPDFLoader, RecursiveUrlLoader, SitemapLoader
+from langchain_community.document_loaders import RecursiveUrlLoader, SitemapLoader
 from langchain_community.vectorstores.azuresearch import AzureSearch
 
 from backend.constants import WEAVIATE_DOCS_INDEX_NAME
@@ -198,68 +198,6 @@ def ingest_docs():
         )
 
 
-async def ingest_pdfs(
-    pdf_dir: str,
-    recursive: bool = True,
-    chunk_size: int = 1000,
-    chunk_overlap: int = 200
-) -> None:
-    """
-    Ingest PDFs from a directory into Azure AI Search.
-    
-    Args:
-        pdf_dir: Directory containing PDFs
-        recursive: Whether to search subdirectories
-        chunk_size: Size of text chunks for splitting
-        chunk_overlap: Overlap between chunks
-    """
-    # Initialize Azure OpenAI embeddings
-    embeddings = AzureOpenAIEmbeddings(
-        azure_deployment=settings.azure_openai_embedding_deployment,
-        azure_endpoint=settings.azure_openai_endpoint,
-        api_key=settings.azure_openai_api_key,
-        api_version=settings.azure_openai_api_version
-    )
-    
-    # Initialize Azure AI Search
-    vector_store = AzureSearch(
-        azure_search_endpoint=settings.azure_search_service_endpoint,
-        azure_search_key=settings.azure_search_admin_key,
-        index_name=settings.azure_search_index_name,
-        embedding_function=embeddings,
-    )
-    
-    # Load and process PDFs
-    pdf_files = list(Path(pdf_dir).rglob("*.pdf")) if recursive else list(Path(pdf_dir).glob("*.pdf"))
-    
-    for pdf_path in pdf_files:
-        # Load PDF
-        loader = PyPDFLoader(str(pdf_path))
-        documents = loader.load()
-        
-        # Split documents
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=["\n\n", "\n", " ", ""],
-            length_function=len
-        )
-        splits = text_splitter.split_documents(documents)
-        
-        # Add metadata
-        for split in splits:
-            split.metadata.update({
-                "source": str(pdf_path.name),
-                "file_path": str(pdf_path),
-                "chunk_size": chunk_size,
-                "chunk_overlap": chunk_overlap,
-                "created_at": datetime.utcnow().isoformat()
-            })
-        
-        # Add to vector store
-        await vector_store.aadd_documents(splits)
-
-
 async def ingest_documents(
     directory_path: str,
     recursive: bool = True,
@@ -270,10 +208,10 @@ async def ingest_documents(
     max_concurrency: int = 5
 ) -> Dict[str, Any]:
     """
-    Ingest multiple document types from a directory into Azure AI Search using Docling.
+    Process all supported documents in a directory and add them to the vector store.
     
     Args:
-        directory_path: Directory containing documents
+        directory_path: Path to the directory containing documents
         recursive: Whether to search subdirectories
         chunk_size: Size of text chunks for splitting
         chunk_overlap: Overlap between chunks
@@ -300,41 +238,9 @@ async def ingest_documents(
     )
 
 
-async def process_uploaded_document(
-    file_content: bytes,
-    filename: str,
-    chunk_size: int = 1000,
-    chunk_overlap: int = 200
-) -> Dict[str, Any]:
-    """
-    Process an uploaded document file and ingest it into Azure AI Search.
-    
-    Args:
-        file_content: File content as bytes
-        filename: Original filename
-        chunk_size: Size of text chunks for splitting
-        chunk_overlap: Overlap between chunks
-        
-    Returns:
-        Dict: Processing statistics
-    """
-    # Initialize document processor
-    processor = DocumentProcessor(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap
-    )
-    
-    # Process the uploaded file
-    return await processor.process_uploaded_file(
-        file_content=file_content,
-        filename=filename
-    )
-
-
 if __name__ == "__main__":
     # Use this to ingest documents
     ingest_docs()
-    # ingest_pdfs("path/to/your/pdfs")
     # To ingest multiple document types:
     # import asyncio
     # asyncio.run(ingest_documents("path/to/your/documents"))

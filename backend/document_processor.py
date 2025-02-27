@@ -7,11 +7,15 @@ import os
 import logging
 import asyncio
 import traceback
+import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union, Tuple
 
-from docling import Document as DoclingDocument
+# Suppress docling deprecation warning
+warnings.filterwarnings("ignore", category=DeprecationWarning, module="docling_core")
+
+from docling.document_converter import DocumentConverter as DoclingDocument
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores.azuresearch import AzureSearch
@@ -218,10 +222,29 @@ class DocumentProcessor:
         
         try:
             # Use Docling to extract text and metadata
-            docling_doc = DoclingDocument.from_file(str(file_path))
+            docling_doc = DoclingDocument.from_file(file_path)
             
-            # Create a LangChain document
-            content = docling_doc.text
+            # Extract content using Docling's structured parsing
+            content_parts = []
+            
+            # Get main text content
+            if docling_doc.text:
+                content_parts.append(docling_doc.text)
+            
+            # Extract text from sections if available
+            if hasattr(docling_doc, 'sections'):
+                for section in docling_doc.sections:
+                    if section.text:
+                        content_parts.append(f"\nSection: {section.title if section.title else 'Untitled'}\n{section.text}")
+            
+            # Extract tables if available
+            if hasattr(docling_doc, 'tables'):
+                for i, table in enumerate(docling_doc.tables):
+                    if table.text:
+                        content_parts.append(f"\nTable {i+1}:\n{table.text}")
+            
+            # Combine all content
+            content = "\n\n".join(content_parts)
             
             # Check if content is empty
             if not content or content.isspace():
@@ -238,15 +261,27 @@ class DocumentProcessor:
                 "created_at": datetime.utcnow().isoformat(),
                 "chunk_size": self.chunk_size,
                 "chunk_overlap": self.chunk_overlap,
-                "processor_version": "2.0.0",  # Add version for tracking
+                "processor_version": "2.0.0",
             }
             
-            # Add additional metadata from Docling if available
-            if hasattr(docling_doc, "metadata") and docling_doc.metadata:
+            # Add Docling metadata
+            if hasattr(docling_doc, 'metadata'):
+                # Add basic metadata
                 for key, value in docling_doc.metadata.items():
-                    # Convert non-string metadata to strings to ensure compatibility
                     if isinstance(value, (str, int, float, bool)):
-                        metadata[key] = str(value)
+                        metadata[f"docling_{key}"] = str(value)
+                
+                # Add language if detected
+                if hasattr(docling_doc.metadata, 'language'):
+                    metadata['language'] = str(docling_doc.metadata.language)
+                
+                # Add page count if available
+                if hasattr(docling_doc.metadata, 'pages'):
+                    metadata['page_count'] = str(len(docling_doc.metadata.pages))
+                
+                # Add OCR confidence if available
+                if hasattr(docling_doc.metadata, 'ocr_confidence'):
+                    metadata['ocr_confidence'] = str(docling_doc.metadata.ocr_confidence)
             
             # Create a single document
             doc = Document(page_content=content, metadata=metadata)
@@ -474,203 +509,4 @@ class DocumentProcessor:
                 "file_path": result.get("file_path", "Unknown"),
                 "error": result.get("error", "Unknown error"),
                 "error_type": error_type
-            })
-    
-    async def process_uploaded_file(self, file_content: bytes, filename: str) -> Dict[str, Any]:
-        """
-        Process an uploaded file from memory.
-        
-        Args:
-            file_content: File content as bytes
-            filename: Original filename
-            
-        Returns:
-            Dict: Processing statistics
-        """
-        # Validate inputs
-        if not file_content:
-            return {
-                "filename": filename,
-                "error": "Empty file content",
-                "error_type": "empty_file",
-                "success": False
-            }
-        
-        if not filename:
-            return {
-                "filename": "unknown",
-                "error": "Missing filename",
-                "error_type": "missing_filename",
-                "success": False
-            }
-        
-        # Check file extension
-        file_ext = Path(filename).suffix.lower()
-        if file_ext not in SUPPORTED_EXTENSIONS:
-            return {
-                "filename": filename,
-                "error": f"Unsupported file format: {file_ext}",
-                "error_type": "unsupported_format",
-                "success": False
-            }
-        
-        # Create a temporary file
-        temp_dir = Path("./temp_uploads")
-        temp_dir.mkdir(exist_ok=True)
-        
-        file_path = temp_dir / filename
-        
-        try:
-            # Write the file content
-            with open(file_path, "wb") as f:
-                f.write(file_content)
-            
-            # Process the file
-            documents, error = self.process_file(file_path)
-            
-            stats = {
-                "filename": filename,
-                "chunks": len(documents),
-                "success": False,
-                "file_type": SUPPORTED_EXTENSIONS.get(file_ext, "Unknown")
-            }
-            
-            if error:
-                stats["error"] = error.message
-                stats["error_type"] = error.error_type
-                logger.warning(f"Error processing uploaded file {filename}: {error.message}")
-                return stats
-            
-            if documents:
-                try:
-                    # Add to vector store
-                    await self.vector_store.aadd_documents(documents)
-                    stats["success"] = True
-                    logger.info(f"Processed uploaded file {filename}: {len(documents)} chunks")
-                except Exception as e:
-                    stats["error"] = f"Failed to add to vector store: {str(e)}"
-                    stats["error_type"] = "vector_store_error"
-                    logger.error(f"Vector store error for {filename}: {str(e)}")
-            else:
-                stats["error"] = "No content extracted"
-                stats["error_type"] = "empty_content"
-                logger.warning(f"No content extracted from uploaded file {filename}")
-            
-            return stats
-            
-        except Exception as e:
-            logger.error(f"Failed to process uploaded file {filename}: {str(e)}")
-            logger.debug(f"Detailed error: {traceback.format_exc()}")
-            return {
-                "filename": filename,
-                "error": str(e),
-                "error_type": "processing_error",
-                "success": False
-            }
-        finally:
-            # Clean up the temporary file
-            try:
-                if file_path.exists():
-                    file_path.unlink()
-            except Exception as e:
-                logger.warning(f"Failed to clean up temporary file {file_path}: {str(e)}")
-    
-    async def process_uploaded_files_parallel(
-        self, 
-        files: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
-        """
-        Process multiple uploaded files in parallel.
-        
-        Args:
-            files: List of dictionaries containing file content and filename
-                  Each dict should have 'content' and 'filename' keys
-            
-        Returns:
-            List[Dict]: Processing results for each file
-        """
-        # Validate input
-        if not files:
-            return [{
-                "error": "No files provided",
-                "error_type": "no_files",
-                "success": False
-            }]
-        
-        # Validate each file entry
-        valid_files = []
-        invalid_results = []
-        
-        for i, file_data in enumerate(files):
-            if not isinstance(file_data, dict):
-                invalid_results.append({
-                    "index": i,
-                    "error": "Invalid file data format",
-                    "error_type": "invalid_format",
-                    "success": False
-                })
-                continue
-                
-            if 'content' not in file_data or not file_data['content']:
-                invalid_results.append({
-                    "index": i,
-                    "error": "Missing or empty file content",
-                    "error_type": "empty_content",
-                    "success": False
-                })
-                continue
-                
-            if 'filename' not in file_data or not file_data['filename']:
-                invalid_results.append({
-                    "index": i,
-                    "error": "Missing filename",
-                    "error_type": "missing_filename",
-                    "success": False
-                })
-                continue
-                
-            valid_files.append(file_data)
-        
-        if not valid_files:
-            return invalid_results
-        
-        # Process files in parallel with controlled concurrency
-        # Split files into batches to control memory usage
-        batches = [valid_files[i:i + self.max_concurrency] for i in range(0, len(valid_files), self.max_concurrency)]
-        
-        all_results = []
-        all_results.extend(invalid_results)  # Add invalid file results
-        
-        try:
-            for batch in batches:
-                # Process batch concurrently
-                batch_results = await asyncio.gather(*[
-                    self.process_uploaded_file(
-                        file_content=file_data['content'],
-                        filename=file_data['filename']
-                    ) 
-                    for file_data in batch
-                ], return_exceptions=True)
-                
-                # Handle any exceptions from gather
-                for i, result in enumerate(batch_results):
-                    if isinstance(result, Exception):
-                        logger.error(f"Error in batch processing: {str(result)}")
-                        all_results.append({
-                            "filename": batch[i].get('filename', 'unknown'),
-                            "error": f"Unexpected error: {str(result)}",
-                            "error_type": "batch_processing_error",
-                            "success": False
-                        })
-                    else:
-                        all_results.append(result)
-        except Exception as e:
-            logger.error(f"Critical error in parallel processing: {str(e)}")
-            logger.debug(f"Detailed error: {traceback.format_exc()}")
-            all_results.append({
-                "error": f"Critical error in parallel processing: {str(e)}",
-                "error_type": "critical_error",
-                "success": False
-            })
-        
-        return all_results 
+            }) 

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Body, UploadFile, File, Form, Query, Request
+from fastapi import FastAPI, HTTPException, Body, UploadFile, File, Form, Query, Request, status
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,7 +6,6 @@ from backend.chat_workflow import ChatWorkflow
 from backend.models import ChatInput, ChatRequest, ThreadCreatePayload, ThreadHistoryPayload, ThreadSearchPayload, ThreadUpdatePayload
 from backend.thread_manager import ThreadManager
 from pathlib import Path
-from backend.ingest import ingest_pdfs, ingest_documents, process_uploaded_document
 import os
 import json
 import logging
@@ -294,78 +293,6 @@ async def chat_playground(
             logger.error(f"Playground error: {str(e)}")
             raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/ingest/pdfs")
-async def ingest_pdf_documents(
-    folder_path: str = Query(..., description="Path to folder containing PDFs"),
-    recursive: bool = Query(True, description="Whether to search subdirectories"),
-    chunk_size: int = Query(1000, description="Size of text chunks for splitting", gt=0, le=10000),
-    chunk_overlap: int = Query(200, description="Overlap between chunks", ge=0, lt=5000)
-):
-    """
-    Ingest PDF documents from a specified folder into Azure AI Search.
-    
-    Args:
-        folder_path: Path to folder containing PDFs
-        recursive: Whether to search subdirectories
-        chunk_size: Size of text chunks for splitting
-        chunk_overlap: Overlap between chunks
-    """
-    # Validate folder path
-    folder = Path(folder_path)
-    if not folder.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Directory not found: {folder_path}"
-        )
-    if not folder.is_dir():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Path is not a directory: {folder_path}"
-        )
-    
-    # Validate chunk parameters
-    if chunk_overlap >= chunk_size:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="chunk_overlap must be less than chunk_size"
-        )
-    
-    try:
-        await ingest_pdfs(
-            folder_path,
-            recursive=recursive,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap
-        )
-        return {
-            "status": "success", 
-            "message": "PDFs ingested successfully",
-            "folder": str(folder),
-            "recursive": recursive,
-            "chunk_size": chunk_size,
-            "chunk_overlap": chunk_overlap
-        }
-    except Exception as e:
-        logger.error(f"Error ingesting PDFs: {str(e)}")
-        logger.debug(traceback.format_exc())
-        
-        # Provide more specific error messages based on the exception
-        if "permission" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied accessing directory: {folder_path}"
-            )
-        elif "not found" in str(e).lower() or "no such" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Directory or files not found: {folder_path}"
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=str(e)
-            )
-
 @app.post("/ingest/documents")
 async def ingest_document_folder(
     folder_path: str = Query(..., description="Path to folder containing documents"),
@@ -377,19 +304,23 @@ async def ingest_document_folder(
     max_concurrency: int = Query(5, description="Maximum number of files to process concurrently", ge=1, le=20)
 ):
     """
-    Ingest multiple document types from a specified folder into Azure AI Search.
+    Process all supported documents in a directory and add them to the vector store.
     
     Args:
-        folder_path: Path to folder containing documents
+        folder_path: Path to the directory containing documents
         recursive: Whether to search subdirectories
         chunk_size: Size of text chunks for splitting
         chunk_overlap: Overlap between chunks
         file_extensions: List of file extensions to process (if None, process all supported types)
         parallel: Whether to process files in parallel
         max_concurrency: Maximum number of files to process concurrently
+        
+    Returns:
+        Dict: Processing statistics
     """
-    # Validate folder path
     folder = Path(folder_path)
+    
+    # Validate folder path
     if not folder.exists():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -408,24 +339,15 @@ async def ingest_document_folder(
             detail="chunk_overlap must be less than chunk_size"
         )
     
-    # Validate file extensions
-    if file_extensions:
-        invalid_extensions = [ext for ext in file_extensions if not ext.startswith(".")]
-        if invalid_extensions:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid file extensions (must start with '.'): {invalid_extensions}"
-            )
-    
     try:
-        # Initialize document processor with concurrency settings
+        # Initialize document processor
         processor = DocumentProcessor(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
             max_concurrency=max_concurrency
         )
         
-        # Process all documents in the directory
+        # Process the directory
         stats = await processor.process_directory(
             directory_path=folder_path,
             recursive=recursive,
@@ -433,314 +355,37 @@ async def ingest_document_folder(
             parallel=parallel
         )
         
-        # Check if any files were processed
-        if stats.get("total_files", 0) == 0:
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={
-                    "status": "warning",
-                    "message": f"No matching files found in {folder_path}",
-                    "stats": stats
-                }
-            )
+        if stats["total_files"] == 0:
+            return {
+                "status": "warning",
+                "message": stats["warning"],
+                "stats": stats
+            }
         
-        # Check if all files failed
-        if stats.get("failed_files", 0) == stats.get("total_files", 0) and stats.get("total_files", 0) > 0:
-            return JSONResponse(
-                status_code=status.HTTP_207_MULTI_STATUS,
-                content={
-                    "status": "error",
-                    "message": "All files failed to process",
-                    "stats": stats
-                }
-            )
-        
-        # Check if some files failed
-        if stats.get("failed_files", 0) > 0:
-            return JSONResponse(
-                status_code=status.HTTP_207_MULTI_STATUS,
-                content={
-                    "status": "partial_success",
-                    "message": f"Processed {stats.get('processed_files', 0)} files successfully, {stats.get('failed_files', 0)} files failed",
-                    "stats": stats
-                }
-            )
-        
-        # All files processed successfully
-        return {
-            "status": "success", 
-            "message": f"Successfully processed {stats.get('processed_files', 0)} documents with {stats.get('total_chunks', 0)} chunks",
-            "stats": stats
-        }
-    except ValueError as e:
-        # Handle validation errors
-        logger.error(f"Validation error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except Exception as e:
-        logger.error(f"Error ingesting documents: {str(e)}")
-        logger.debug(traceback.format_exc())
-        
-        # Provide more specific error messages based on the exception
-        if "permission" in str(e).lower():
+        if stats["failed_files"] == stats["total_files"]:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied accessing directory: {folder_path}"
-            )
-        elif "not found" in str(e).lower() or "no such" in str(e).lower():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Directory or files not found: {folder_path}"
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=str(e)
-            )
-
-@app.post("/ingest/upload")
-async def upload_document(
-    file: UploadFile = File(..., description="The document file to upload"),
-    chunk_size: int = Form(1000, description="Size of text chunks for splitting", gt=0, le=10000),
-    chunk_overlap: int = Form(200, description="Overlap between chunks", ge=0, lt=5000)
-):
-    """
-    Upload and process a single document file.
-    
-    Args:
-        file: The uploaded file
-        chunk_size: Size of text chunks for splitting
-        chunk_overlap: Overlap between chunks
-    """
-    # Validate file
-    if not file.filename:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing filename"
-        )
-    
-    # Validate file extension
-    file_ext = Path(file.filename).suffix.lower()
-    from backend.document_processor import SUPPORTED_EXTENSIONS
-    if file_ext not in SUPPORTED_EXTENSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported file format: {file_ext}. Supported formats: {list(SUPPORTED_EXTENSIONS.keys())}"
-        )
-    
-    # Validate chunk parameters
-    if chunk_overlap >= chunk_size:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="chunk_overlap must be less than chunk_size"
-        )
-    
-    try:
-        # Read file content
-        file_content = await file.read()
-        
-        # Check if file is empty
-        if not file_content:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Empty file content"
-            )
-        
-        # Process the uploaded file
-        stats = await process_uploaded_document(
-            file_content=file_content,
-            filename=file.filename,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap
-        )
-        
-        if not stats.get("success", False):
-            error_type = stats.get("error_type", "unknown_error")
-            error_msg = stats.get("error", "Unknown error")
-            
-            # Return appropriate status code based on error type
-            if error_type == "unsupported_format":
-                status_code = status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
-            elif error_type in ["empty_file", "empty_content", "missing_filename"]:
-                status_code = status.HTTP_400_BAD_REQUEST
-            elif error_type == "file_access_error":
-                status_code = status.HTTP_403_FORBIDDEN
-            elif error_type == "vector_store_error":
-                status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-            else:
-                status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
-                
-            raise HTTPException(
-                status_code=status_code,
-                detail=f"Failed to process file: {error_msg}"
-            )
-        
-        return {
-            "status": "success",
-            "message": f"Document processed successfully: {stats.get('chunks', 0)} chunks created",
-            "stats": stats
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error processing uploaded document: {str(e)}")
-        logger.debug(traceback.format_exc())
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected error processing document: {str(e)}"
-        )
-
-@app.post("/ingest/upload-batch")
-async def upload_multiple_documents(
-    files: List[UploadFile] = File(..., description="The document files to upload"),
-    chunk_size: int = Form(1000, description="Size of text chunks for splitting", gt=0, le=10000),
-    chunk_overlap: int = Form(200, description="Overlap between chunks", ge=0, lt=5000),
-    parallel: bool = Form(True, description="Whether to process files in parallel"),
-    max_concurrency: int = Form(5, description="Maximum number of files to process concurrently", ge=1, le=20)
-):
-    """
-    Upload and process multiple document files.
-    
-    Args:
-        files: List of uploaded files
-        chunk_size: Size of text chunks for splitting
-        chunk_overlap: Overlap between chunks
-        parallel: Whether to process files in parallel
-        max_concurrency: Maximum number of files to process concurrently
-    """
-    # Validate files
-    if not files:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No files provided"
-        )
-    
-    # Validate chunk parameters
-    if chunk_overlap >= chunk_size:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="chunk_overlap must be less than chunk_size"
-        )
-    
-    # Check file extensions
-    from backend.document_processor import SUPPORTED_EXTENSIONS
-    unsupported_files = []
-    for file in files:
-        if not file.filename:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="One or more files missing filename"
-            )
-        
-        file_ext = Path(file.filename).suffix.lower()
-        if file_ext not in SUPPORTED_EXTENSIONS:
-            unsupported_files.append(file.filename)
-    
-    if unsupported_files:
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported file format(s): {unsupported_files}. Supported formats: {list(SUPPORTED_EXTENSIONS.keys())}"
-        )
-    
-    try:
-        # Initialize document processor with concurrency settings
-        processor = DocumentProcessor(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            max_concurrency=max_concurrency
-        )
-        
-        # Prepare file data
-        file_data_list = []
-        for file in files:
-            # Read file content
-            file_content = await file.read()
-            
-            # Check if file is empty
-            if not file_content:
-                logger.warning(f"Empty file content: {file.filename}")
-                continue
-                
-            file_data_list.append({
-                'content': file_content,
-                'filename': file.filename
-            })
-        
-        # Check if any valid files remain after filtering
-        if not file_data_list:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No valid files to process (all files were empty)"
-            )
-        
-        if parallel and len(file_data_list) > 1:
-            # Process files in parallel
-            results = await processor.process_uploaded_files_parallel(file_data_list)
-        else:
-            # Process files sequentially
-            results = []
-            for file_data in file_data_list:
-                result = await processor.process_uploaded_file(
-                    file_content=file_data['content'],
-                    filename=file_data['filename']
-                )
-                results.append(result)
-        
-        # Format results
-        formatted_results = []
-        for result in results:
-            formatted_results.append({
-                "filename": result.get("filename", ""),
-                "success": result.get("success", False),
-                "chunks": result.get("chunks", 0),
-                "error": result.get("error", None),
-                "error_type": result.get("error_type", None)
-            })
-        
-        # Calculate success and failure counts
-        success_count = sum(1 for r in formatted_results if r["success"])
-        failure_count = len(formatted_results) - success_count
-        
-        # Check if any files were processed successfully
-        if success_count == 0:
-            return JSONResponse(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                content={
-                    "status": "error",
-                    "message": "Failed to process any of the uploaded files",
-                    "results": formatted_results
-                }
+                detail="All files failed to process",
+                headers={"X-Error-Details": str(stats["error_types"])}
             )
         
-        # If some files failed, return partial success
-        if failure_count > 0:
-            return JSONResponse(
-                status_code=status.HTTP_207_MULTI_STATUS,
-                content={
-                    "status": "partial_success",
-                    "message": f"Processed {success_count} of {len(formatted_results)} files successfully",
-                    "parallel_processing": parallel and len(file_data_list) > 1,
-                    "max_concurrency": max_concurrency if parallel and len(file_data_list) > 1 else 1,
-                    "results": formatted_results
-                }
-            )
+        if stats["failed_files"] > 0:
+            return {
+                "status": "partial_success",
+                "message": f"Processed {stats['processed_files']} files successfully, {stats['failed_files']} failed",
+                "stats": stats
+            }
         
-        # All files processed successfully
         return {
             "status": "success",
-            "message": f"Successfully processed all {len(formatted_results)} files",
-            "parallel_processing": parallel and len(file_data_list) > 1,
-            "max_concurrency": max_concurrency if parallel and len(file_data_list) > 1 else 1,
-            "results": formatted_results
+            "message": f"Successfully processed {stats['processed_files']} files",
+            "stats": stats
         }
-    except HTTPException:
-        raise
+        
     except Exception as e:
-        logger.error(f"Error processing uploaded documents: {str(e)}")
+        logger.error(f"Error processing directory {folder_path}: {str(e)}")
         logger.debug(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected error processing documents: {str(e)}"
+            detail=f"Error processing directory: {str(e)}"
         )
