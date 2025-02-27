@@ -3,7 +3,7 @@ from datetime import datetime
 import logging
 import os
 import re
-from typing import Optional, List
+from typing import Optional, List, Dict, Any, Union
 from pathlib import Path
 
 import weaviate
@@ -20,6 +20,7 @@ from backend.constants import WEAVIATE_DOCS_INDEX_NAME
 from backend.embeddings import get_embeddings_model
 from backend.parser import langchain_docs_extractor
 from backend.config import settings
+from backend.document_processor import DocumentProcessor
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -259,7 +260,75 @@ async def ingest_pdfs(
         await vector_store.aadd_documents(splits)
 
 
+async def ingest_documents(
+    directory_path: str,
+    recursive: bool = True,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+    file_extensions: Optional[List[str]] = None
+) -> Dict[str, Any]:
+    """
+    Ingest multiple document types from a directory into Azure AI Search using Docling.
+    
+    Args:
+        directory_path: Directory containing documents
+        recursive: Whether to search subdirectories
+        chunk_size: Size of text chunks for splitting
+        chunk_overlap: Overlap between chunks
+        file_extensions: List of file extensions to process (if None, process all supported types)
+        
+    Returns:
+        Dict: Processing statistics
+    """
+    # Initialize document processor
+    processor = DocumentProcessor(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap
+    )
+    
+    # Process all documents in the directory
+    return await processor.process_directory(
+        directory_path=directory_path,
+        recursive=recursive,
+        file_extensions=file_extensions
+    )
+
+
+async def process_uploaded_document(
+    file_content: bytes,
+    filename: str,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200
+) -> Dict[str, Any]:
+    """
+    Process an uploaded document file and ingest it into Azure AI Search.
+    
+    Args:
+        file_content: File content as bytes
+        filename: Original filename
+        chunk_size: Size of text chunks for splitting
+        chunk_overlap: Overlap between chunks
+        
+    Returns:
+        Dict: Processing statistics
+    """
+    # Initialize document processor
+    processor = DocumentProcessor(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap
+    )
+    
+    # Process the uploaded file
+    return await processor.process_uploaded_file(
+        file_content=file_content,
+        filename=filename
+    )
+
+
 if __name__ == "__main__":
     # Use this to ingest documents
     ingest_docs()
     # ingest_pdfs("path/to/your/pdfs")
+    # To ingest multiple document types:
+    # import asyncio
+    # asyncio.run(ingest_documents("path/to/your/documents"))

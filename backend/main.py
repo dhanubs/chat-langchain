@@ -1,13 +1,14 @@
-from fastapi import FastAPI, HTTPException, Body, UploadFile, File
+from fastapi import FastAPI, HTTPException, Body, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from backend.chat_workflow import ChatWorkflow
 from backend.models import ChatInput, ChatRequest, ThreadCreatePayload, ThreadHistoryPayload, ThreadSearchPayload, ThreadUpdatePayload
 from backend.thread_manager import ThreadManager
 from pathlib import Path
-from backend.ingest import ingest_pdfs
+from backend.ingest import ingest_pdfs, ingest_documents, process_uploaded_document
 import os
 import json
 import logging
+from typing import List, Optional
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
 
@@ -283,3 +284,137 @@ async def ingest_pdf_documents(
         return {"status": "success", "message": "PDFs ingested successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ingest/documents")
+async def ingest_document_folder(
+    folder_path: str,
+    recursive: bool = True,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+    file_extensions: Optional[List[str]] = None
+):
+    """
+    Ingest multiple document types from a specified folder into Azure AI Search.
+    
+    Args:
+        folder_path: Path to folder containing documents
+        recursive: Whether to search subdirectories
+        chunk_size: Size of text chunks for splitting
+        chunk_overlap: Overlap between chunks
+        file_extensions: List of file extensions to process (if None, process all supported types)
+    """
+    try:
+        stats = await ingest_documents(
+            directory_path=folder_path,
+            recursive=recursive,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+            file_extensions=file_extensions
+        )
+        return {
+            "status": "success", 
+            "message": "Documents ingested successfully",
+            "stats": stats
+        }
+    except Exception as e:
+        logger.error(f"Error ingesting documents: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ingest/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    chunk_size: int = Form(1000),
+    chunk_overlap: int = Form(200)
+):
+    """
+    Upload and process a single document file.
+    
+    Args:
+        file: The uploaded file
+        chunk_size: Size of text chunks for splitting
+        chunk_overlap: Overlap between chunks
+    """
+    try:
+        # Read file content
+        file_content = await file.read()
+        
+        # Process the uploaded file
+        stats = await process_uploaded_document(
+            file_content=file_content,
+            filename=file.filename,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap
+        )
+        
+        if not stats.get("success", False):
+            raise HTTPException(
+                status_code=422, 
+                detail=f"Failed to process file: {stats.get('error', 'Unknown error')}"
+            )
+        
+        return {
+            "status": "success",
+            "message": f"Document processed successfully: {stats.get('chunks', 0)} chunks created",
+            "stats": stats
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing uploaded document: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/ingest/upload-batch")
+async def upload_multiple_documents(
+    files: List[UploadFile] = File(...),
+    chunk_size: int = Form(1000),
+    chunk_overlap: int = Form(200)
+):
+    """
+    Upload and process multiple document files.
+    
+    Args:
+        files: List of uploaded files
+        chunk_size: Size of text chunks for splitting
+        chunk_overlap: Overlap between chunks
+    """
+    results = []
+    
+    for file in files:
+        try:
+            # Read file content
+            file_content = await file.read()
+            
+            # Process the uploaded file
+            stats = await process_uploaded_document(
+                file_content=file_content,
+                filename=file.filename,
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap
+            )
+            
+            results.append({
+                "filename": file.filename,
+                "success": stats.get("success", False),
+                "chunks": stats.get("chunks", 0),
+                "error": stats.get("error", None)
+            })
+            
+        except Exception as e:
+            results.append({
+                "filename": file.filename,
+                "success": False,
+                "error": str(e)
+            })
+    
+    # Check if any files were processed successfully
+    if not any(result["success"] for result in results):
+        raise HTTPException(
+            status_code=422,
+            detail="Failed to process any of the uploaded files"
+        )
+    
+    return {
+        "status": "success",
+        "message": f"Processed {sum(1 for r in results if r['success'])} of {len(results)} files successfully",
+        "results": results
+    }

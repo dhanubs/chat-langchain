@@ -7,7 +7,7 @@ readme = "README.md"
 packages = [{ include = "backend" }]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.12"
 langchain = ">=0.3.0,<0.4.0"
 langsmith = { version = "0.2.10", extras = ["langsmith-pyo3", "compression"] }
 langchain-cohere = ">=0.3.0,<0.4.0"
@@ -29,7 +29,6 @@ pillow = "^10.2.0"
 psycopg2-binary = "^2.9.9"
 uvicorn = "^0.34.0"
 fastapi = "^0.115.6"
-langserve = ">=0.0.41"
 sse-starlette = "^2.2.1"
 rich = "^13.9.4"
 motor = "^3.6.1"
@@ -38,6 +37,10 @@ azure-search-documents = "11.4.0"
 azure-identity = "1.15.0"
 azure-core = "1.30.0"
 pypdf = "^5.3.0"
+docling = "^2.25.0"
+python-docx = "^1.1.0"
+python-pptx = "^1.0.1"
+dotenv = "^0.9.9"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.3.0"

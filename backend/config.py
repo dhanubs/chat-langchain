@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
+
     # Application settings
     environment: str = "development"
     mongodb_uri: str = "mongodb://localhost:27017"
@@ -8,20 +9,20 @@ class Settings(BaseSettings):
     llm_model: str = "gpt-35-turbo-16k"
 
     # Azure OpenAI settings
-    azure_openai_api_key: str
-    azure_openai_endpoint: str
+    azure_openai_api_key: str | None = None
+    azure_openai_endpoint: str | None = None
     azure_openai_deployment: str = "gpt-4o"
     azure_openai_embedding_deployment: str = "text-embedding-ada-002"
     azure_openai_api_version: str = "2024-02-15-preview"
     
     # Vanilla OpenAI settings
-    openai_api_key: str
+    openai_api_key: str | None = None
     
     # Azure Search settings
-    azure_search_service_endpoint: str
-    azure_search_service_name: str
-    azure_search_key: str
-    azure_search_admin_key: str
+    azure_search_service_endpoint: str | None = None
+    azure_search_service_name: str | None = None
+    azure_search_key: str | None = None
+    azure_search_admin_key: str | None = None
     azure_search_index_name: str = "documents"
     
     # Other provider settings
@@ -32,6 +33,8 @@ class Settings(BaseSettings):
     cohere_api_key: str | None = None
     
     class Config:
-        env_file = ".env"
+        env_file = ".env",
+        case_sensitive = False,
+        extra = "allow"
 
 settings = Settings() 
