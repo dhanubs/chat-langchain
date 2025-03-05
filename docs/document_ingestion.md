@@ -9,12 +9,10 @@ The following document types are supported:
 - PDF Documents (`.pdf`)
 - Word Documents (`.docx`, `.doc`)
 - PowerPoint Presentations (`.pptx`, `.ppt`)
-- Text Documents (`.txt`)
-- Markdown Documents (`.md`)
-- CSV Documents (`.csv`)
 - Excel Spreadsheets (`.xlsx`, `.xls`)
-- HTML Documents (`.html`, `.htm`)
 - Rich Text Format (`.rtf`)
+
+> Note: Text Documents (`.txt`), Markdown Documents (`.md`), CSV Documents (`.csv`), and HTML Documents (`.html`, `.htm`) are not currently supported by the implementation.
 
 ## API Endpoints
 

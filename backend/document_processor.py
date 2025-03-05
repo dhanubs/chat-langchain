@@ -137,6 +137,26 @@ class DocumentProcessor:
         try:
             # Initialize document converter (will use offline mode due to environment variables)
             self.converter = DocumentConverter()
+            
+            # Initialize vector store if Azure Search settings are available
+            if settings.azure_search_service and settings.azure_search_key:
+                embeddings = AzureOpenAIEmbeddings(
+                    azure_deployment=settings.azure_openai_embedding_deployment,
+                    openai_api_version=settings.azure_openai_api_version,
+                    azure_endpoint=settings.azure_openai_endpoint,
+                    api_key=settings.azure_openai_api_key,
+                )
+                
+                self.vector_store = AzureSearch(
+                    azure_search_endpoint=f"https://{settings.azure_search_service}.search.windows.net",
+                    azure_search_key=settings.azure_search_key,
+                    index_name=settings.azure_search_index,
+                    embedding_function=embeddings.embed_query,
+                )
+            else:
+                self.vector_store = None
+                logger.warning("Azure Search settings not configured. Vector store functionality will be disabled.")
+                
         except Exception as e:
             logger.error("Failed to initialize DocumentConverter. Make sure required models are installed.")
             logger.error(f"Error: {str(e)}")
@@ -255,6 +275,30 @@ class DocumentProcessor:
             logger.debug(f"Detailed error: {traceback.format_exc()}")
             return [], error
     
+    def classify_error(self, file_path: Union[str, Path], exception: Exception) -> DocumentProcessingError:
+        """
+        Classify an exception into a specific DocumentProcessingError type.
+        
+        Args:
+            file_path: Path to the file being processed
+            exception: The exception that occurred
+            
+        Returns:
+            DocumentProcessingError: A specific error type
+        """
+        file_path_str = str(file_path)
+        
+        # Check for file access errors
+        if isinstance(exception, (FileNotFoundError, PermissionError, OSError)):
+            return FileAccessError(file_path_str, exception)
+        
+        # Check for parsing errors
+        if "parse" in str(exception).lower() or "convert" in str(exception).lower():
+            return ParsingError(file_path_str, exception)
+        
+        # Default to a generic parsing error
+        return ParsingError(file_path_str, exception)
+    
     async def process_file_async(self, file_path: Union[str, Path]) -> Dict[str, Any]:
         """
         Process a single file asynchronously and return processing results.
@@ -282,7 +326,10 @@ class DocumentProcessor:
             
             # Add to vector store
             try:
-                await self.vector_store.aadd_documents(documents)
+                if self.vector_store is None:
+                    logger.warning(f"Vector store not configured. Skipping vector store addition for {Path(file_path).name}")
+                else:
+                    await self.vector_store.aadd_documents(documents)
             except Exception as e:
                 error = VectorStoreError(str(file_path), e)
                 logger.error(f"{error.error_type} for {Path(file_path).name}: {error.message}")
