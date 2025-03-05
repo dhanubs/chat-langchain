@@ -1,6 +1,6 @@
 """
 Document processor module for handling various document types using Docling.
-Supports PDF, DOCX, PPTX, TXT, and other document formats.
+Supports PDF, DOCX, PPTX, and other document formats.
 """
 
 import os
@@ -11,6 +11,10 @@ import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union, Tuple
+
+# Set environment variables for offline mode
+os.environ["DOCLING_OFFLINE"] = "1"
+os.environ["HF_HUB_OFFLINE"] = "1"
 
 # Suppress docling deprecation warning
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="docling_core")
@@ -32,13 +36,8 @@ SUPPORTED_EXTENSIONS = {
     ".doc": "Word Document (Legacy)",
     ".pptx": "PowerPoint Presentation",
     ".ppt": "PowerPoint Presentation (Legacy)",
-    ".txt": "Text Document",
-    ".md": "Markdown Document",
-    ".csv": "CSV Document",
     ".xlsx": "Excel Spreadsheet",
     ".xls": "Excel Spreadsheet (Legacy)",
-    ".html": "HTML Document",
-    ".htm": "HTML Document",
     ".rtf": "Rich Text Format",
 }
 
@@ -103,7 +102,7 @@ class VectorStoreError(DocumentProcessingError):
 class DocumentProcessor:
     """
     Document processor class for handling various document types.
-    Uses Docling for document parsing and extraction.
+    Uses Docling for document parsing and extraction in offline mode.
     """
     
     def __init__(
@@ -127,26 +126,6 @@ class DocumentProcessor:
         self.separators = separators or ["\n\n", "\n", " ", ""]
         self.max_concurrency = max_concurrency
         
-        # Initialize Azure OpenAI embeddings
-        try:
-            self.embeddings = AzureOpenAIEmbeddings(
-                azure_deployment=settings.azure_openai_embedding_deployment,
-                azure_endpoint=settings.azure_openai_endpoint,
-                api_key=settings.azure_openai_api_key,
-                api_version=settings.azure_openai_api_version
-            )
-            
-            # Initialize Azure AI Search
-            self.vector_store = AzureSearch(
-                azure_search_endpoint=settings.azure_search_service_endpoint,
-                azure_search_key=settings.azure_search_admin_key,
-                index_name=settings.azure_search_index_name,
-                embedding_function=self.embeddings,
-            )
-        except Exception as e:
-            logger.error(f"Error initializing document processor: {str(e)}")
-            raise ValueError(f"Failed to initialize document processor: {str(e)}")
-        
         # Initialize text splitter
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=self.chunk_size,
@@ -154,6 +133,14 @@ class DocumentProcessor:
             separators=self.separators,
             length_function=len
         )
+        
+        try:
+            # Initialize document converter (will use offline mode due to environment variables)
+            self.converter = DocumentConverter()
+        except Exception as e:
+            logger.error("Failed to initialize DocumentConverter. Make sure required models are installed.")
+            logger.error(f"Error: {str(e)}")
+            raise RuntimeError("DocumentConverter initialization failed. Please ensure models are properly installed in the HuggingFace cache directory.") from e
     
     def is_supported_file(self, file_path: Union[str, Path]) -> bool:
         """
@@ -167,40 +154,6 @@ class DocumentProcessor:
         """
         file_path = Path(file_path)
         return file_path.suffix.lower() in SUPPORTED_EXTENSIONS
-    
-    def classify_error(self, file_path: Union[str, Path], error: Exception) -> DocumentProcessingError:
-        """
-        Classify an error that occurred during document processing.
-        
-        Args:
-            file_path: Path to the file
-            error: The original exception
-            
-        Returns:
-            DocumentProcessingError: A classified error
-        """
-        file_path_str = str(file_path)
-        error_message = str(error).lower()
-        
-        # Check for file access errors
-        if any(msg in error_message for msg in ["permission denied", "no such file", "access", "not found"]):
-            return FileAccessError(file_path_str, error)
-        
-        # Check for parsing errors
-        if any(msg in error_message for msg in ["parse", "decode", "syntax", "invalid", "corrupt"]):
-            return ParsingError(file_path_str, error)
-        
-        # Check for vector store errors
-        if any(msg in error_message for msg in ["vector", "embedding", "index", "azure", "search"]):
-            return VectorStoreError(file_path_str, error)
-        
-        # Default to a generic document processing error
-        return DocumentProcessingError(
-            f"Error processing document: {error}",
-            "unknown_error",
-            file_path_str,
-            error
-        )
     
     def process_file(self, file_path: Union[str, Path]) -> Tuple[List[Document], Optional[DocumentProcessingError]]:
         """
@@ -221,8 +174,8 @@ class DocumentProcessor:
             return [], error
         
         try:
-            # Use Docling to extract text and metadata
-            docling_doc = DocumentConverter.convert(file_path)
+            # Process the document
+            docling_doc = self.converter.convert(str(file_path))
             
             # Extract content using Docling's structured parsing
             content_parts = []
@@ -256,7 +209,7 @@ class DocumentProcessor:
             metadata = {
                 "source": str(file_path.name),
                 "file_path": str(file_path),
-                "file_type": SUPPORTED_EXTENSIONS.get(file_path.suffix.lower(), "Unknown"),
+                "file_type": SUPPORTED_EXTENSIONS[file_path.suffix.lower()],
                 "title": file_path.stem,
                 "created_at": datetime.utcnow().isoformat(),
                 "chunk_size": self.chunk_size,
@@ -343,7 +296,7 @@ class DocumentProcessor:
                 }
             
             # Get file type
-            file_type = SUPPORTED_EXTENSIONS.get(Path(file_path).suffix.lower(), "Unknown")
+            file_type = SUPPORTED_EXTENSIONS[Path(file_path).suffix.lower()]
             
             logger.info(f"Processed {Path(file_path).name}: {len(documents)} chunks")
             
