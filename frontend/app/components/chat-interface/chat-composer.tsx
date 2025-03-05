@@ -39,6 +39,10 @@ export const ChatComposer: FC<ChatComposerProps> = (props: ChatComposerProps) =>
         isEmpty ? "" : "md:ml-24 ml-3 mb-6",
         isEmpty ? "w-full" : "md:w-[70%] w-[95%] md:max-w-[832px]",
       )}
+      onSubmit={() => {
+        // Clear the input after submission
+        setInputValue("");
+      }}
     >
       <ComposerPrimitive.Input
         autoFocus
