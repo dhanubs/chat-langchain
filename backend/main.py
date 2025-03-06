@@ -1,3 +1,8 @@
+from dotenv import load_dotenv
+
+# Load environment variables before importing other modules
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException, Body, UploadFile, File, Form, Query, Request, status
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError

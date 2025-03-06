@@ -1,10 +1,11 @@
 #!/usr/bin/env python
 from dotenv import load_dotenv
-import uvicorn
-from backend.config import settings
 
 # Load environment variables before importing app
 load_dotenv()
+
+import uvicorn
+from backend.config import settings
 
 if __name__ == "__main__":
     # Development mode with reload when running directly

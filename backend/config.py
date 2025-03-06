@@ -33,8 +33,8 @@ class Settings(BaseSettings):
     cohere_api_key: str | None = None
     
     class Config:
-        env_file = ".env",
-        case_sensitive = False,
+        env_file = ".env"
+        case_sensitive = False
         extra = "allow"
 
 settings = Settings() 
