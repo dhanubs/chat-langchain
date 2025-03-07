@@ -1,6 +1,11 @@
 """
-Document processor module for handling various document types using Docling.
-Supports PDF, DOCX, PPTX, and other document formats.
+Document processor module for handling various document types.
+Supports PDF, DOCX, PPTX, and other document formats using direct document processing libraries:
+- PyMuPDF (fitz) for PDF text extraction
+- pdfplumber for table extraction from PDFs
+- EasyOCR for image text extraction
+- python-docx for Word documents
+- python-pptx for PowerPoint presentations
 """
 
 import os
@@ -11,21 +16,22 @@ import warnings
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union, Tuple
+import io
+import numpy as np
 
-# Set environment variables for offline mode
-os.environ["DOCLING_OFFLINE"] = "1"
-os.environ["HF_HUB_OFFLINE"] = "1"
-
-# Suppress docling deprecation warning
-warnings.filterwarnings("ignore", category=DeprecationWarning, module="docling_core")
-
-from docling.document_converter import DocumentConverter
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores.azuresearch import AzureSearch
 from langchain_openai import AzureOpenAIEmbeddings
 
 from backend.config import settings
+
+import fitz  # PyMuPDF
+import pdfplumber
+import easyocr
+from PIL import Image
+from docx import Document as DocxDocument
+from pptx import Presentation
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +108,22 @@ class VectorStoreError(DocumentProcessingError):
 class DocumentProcessor:
     """
     Document processor class for handling various document types.
-    Uses Docling for document parsing and extraction in offline mode.
+    Uses a combination of specialized libraries for each file type:
+    - PDF: PyMuPDF for text, pdfplumber for tables, EasyOCR for images
+    - DOCX: python-docx for text and tables
+    - PPTX: python-pptx for slides and shapes
+    
+    Features:
+    - Text extraction from PDFs, Word documents, and PowerPoint presentations
+    - Table extraction from PDFs and Word documents
+    - OCR for images in PDFs
+    - Chunking of extracted text for better processing
+    - Optional vector store integration with Azure Search
+    - Parallel processing support for multiple files
+
+    Note:
+    On first initialization, EasyOCR will download its detection models (~45MB)
+    to the ~/.EasyOCR/ directory. This is a one-time download per machine.
     """
     
     def __init__(
@@ -111,6 +132,8 @@ class DocumentProcessor:
         chunk_overlap: int = 200,
         separators: List[str] = None,
         max_concurrency: int = 5,
+        enable_ocr: bool = False,
+        ocr_model_path: Optional[str] = None,
     ):
         """
         Initialize the document processor.
@@ -120,11 +143,14 @@ class DocumentProcessor:
             chunk_overlap: Overlap between chunks
             separators: Custom separators for text splitting
             max_concurrency: Maximum number of files to process concurrently
+            enable_ocr: Whether to enable OCR for images in PDFs
+            ocr_model_path: Path to EasyOCR model directory (if None, uses default ~/.EasyOCR/)
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.separators = separators or ["\n\n", "\n", " ", ""]
         self.max_concurrency = max_concurrency
+        self.enable_ocr = enable_ocr
         
         # Initialize text splitter
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -135,11 +161,8 @@ class DocumentProcessor:
         )
         
         try:
-            # Initialize document converter (will use offline mode due to environment variables)
-            self.converter = DocumentConverter()
-            
             # Initialize vector store if Azure Search settings are available
-            if settings.azure_search_service and settings.azure_search_key:
+            if settings.azure_search_service_name and settings.azure_search_key:
                 embeddings = AzureOpenAIEmbeddings(
                     azure_deployment=settings.azure_openai_embedding_deployment,
                     openai_api_version=settings.azure_openai_api_version,
@@ -148,19 +171,32 @@ class DocumentProcessor:
                 )
                 
                 self.vector_store = AzureSearch(
-                    azure_search_endpoint=f"https://{settings.azure_search_service}.search.windows.net",
-                    azure_search_key=settings.azure_search_key,
-                    index_name=settings.azure_search_index,
+                    azure_search_endpoint=settings.azure_search_service_endpoint,
+                    azure_search_key=settings.azure_search_admin_key,
+                    index_name=settings.azure_search_index_name,
                     embedding_function=embeddings.embed_query,
                 )
             else:
                 self.vector_store = None
                 logger.warning("Azure Search settings not configured. Vector store functionality will be disabled.")
-                
+            
+            # Initialize EasyOCR only if enabled
+            self.reader = None
+            if enable_ocr:
+                try:
+                    logger.info("Initializing EasyOCR with%s model path", 
+                              f" custom {ocr_model_path}" if ocr_model_path else " default")
+                    self.reader = easyocr.Reader(['en'], gpu=False, 
+                                               model_storage_directory=ocr_model_path)
+                    logger.info("EasyOCR initialization complete")
+                except Exception as ocr_error:
+                    logger.warning(f"Failed to initialize EasyOCR: {str(ocr_error)}. OCR will be disabled.")
+                    self.enable_ocr = False
+            
         except Exception as e:
-            logger.error("Failed to initialize DocumentConverter. Make sure required models are installed.")
+            logger.error("Failed to initialize DocumentProcessor.")
             logger.error(f"Error: {str(e)}")
-            raise RuntimeError("DocumentConverter initialization failed. Please ensure models are properly installed in the HuggingFace cache directory.") from e
+            raise RuntimeError("DocumentProcessor initialization failed.") from e
     
     def is_supported_file(self, file_path: Union[str, Path]) -> bool:
         """
@@ -175,6 +211,94 @@ class DocumentProcessor:
         file_path = Path(file_path)
         return file_path.suffix.lower() in SUPPORTED_EXTENSIONS
     
+    def process_pdf(self, file_path: Union[str, Path]) -> str:
+        """Extract text from PDF including OCR for images if enabled."""
+        text_parts = []
+        
+        # Extract text and images with PyMuPDF
+        with fitz.open(file_path) as doc:
+            for page_num, page in enumerate(doc, 1):
+                # Get regular text
+                text = page.get_text()
+                if text.strip():
+                    text_parts.append(f"Page {page_num}:\n{text}")
+                
+                # Handle images with OCR if enabled
+                if self.enable_ocr and self.reader:
+                    for img in page.get_images():
+                        try:
+                            xref = img[0]
+                            base_img = doc.extract_image(xref)
+                            image_bytes = base_img["image"]
+                            image = Image.open(io.BytesIO(image_bytes))
+                            image_np = np.array(image)
+                            results = self.reader.readtext(image_np)
+                            if results:
+                                ocr_text = ' '.join([text for _, text, _ in results])
+                                if ocr_text.strip():
+                                    text_parts.append(f"Page {page_num} (OCR):\n{ocr_text}")
+                        except Exception as e:
+                            logger.warning(f"Failed to process image on page {page_num}: {str(e)}")
+        
+        # Extract tables with pdfplumber
+        with pdfplumber.open(file_path) as pdf:
+            for page_num, page in enumerate(pdf.pages, 1):
+                tables = page.extract_tables()
+                for table_num, table in enumerate(tables, 1):
+                    if table:
+                        table_text = '\n'.join(['\t'.join([str(cell or '') for cell in row]) for row in table])
+                        text_parts.append(f"Page {page_num} Table {table_num}:\n{table_text}")
+        
+        return '\n\n'.join(text_parts)
+
+    def process_docx(self, file_path: Union[str, Path]) -> str:
+        """Extract text from DOCX files."""
+        text_parts = []
+        doc = DocxDocument(file_path)
+        
+        # Process paragraphs
+        for para in doc.paragraphs:
+            if para.text.strip():
+                text_parts.append(para.text)
+        
+        # Process tables
+        for table in doc.tables:
+            table_text = []
+            for row in table.rows:
+                row_text = [cell.text.strip() for cell in row.cells]
+                table_text.append('\t'.join(row_text))
+            if table_text:
+                text_parts.append('\n'.join(table_text))
+        
+        return '\n\n'.join(text_parts)
+
+    def process_pptx(self, file_path: Union[str, Path]) -> str:
+        """Extract text from PPTX files."""
+        text_parts = []
+        prs = Presentation(file_path)
+        
+        for slide_num, slide in enumerate(prs.slides, 1):
+            slide_text = []
+            
+            # Extract text from shapes
+            for shape in slide.shapes:
+                if hasattr(shape, "text") and shape.text.strip():
+                    slide_text.append(shape.text)
+                
+                # Handle tables
+                if shape.has_table:
+                    table_text = []
+                    for row in shape.table.rows:
+                        row_text = [cell.text.strip() for cell in row.cells]
+                        table_text.append('\t'.join(row_text))
+                    if table_text:
+                        slide_text.append('\n'.join(table_text))
+            
+            if slide_text:
+                text_parts.append(f"Slide {slide_num}:\n" + '\n'.join(slide_text))
+        
+        return '\n\n'.join(text_parts)
+
     def process_file(self, file_path: Union[str, Path]) -> Tuple[List[Document], Optional[DocumentProcessingError]]:
         """
         Process a single file and convert it to LangChain documents.
@@ -194,32 +318,20 @@ class DocumentProcessor:
             return [], error
         
         try:
-            # Process the document
-            docling_doc = self.converter.convert(str(file_path))
+            # Extract content based on file type
+            if file_path.suffix.lower() in ['.pdf']:
+                content = self.process_pdf(file_path)
+            elif file_path.suffix.lower() in ['.docx', '.doc']:
+                content = self.process_docx(file_path)
+            elif file_path.suffix.lower() in ['.pptx', '.ppt']:
+                content = self.process_pptx(file_path)
+            else:
+                return [], DocumentProcessingError(
+                    f"Unsupported file format: {file_path.suffix}",
+                    "unsupported_format",
+                    str(file_path)
+                )
             
-            # Extract content using Docling's structured parsing
-            content_parts = []
-            
-            # Get main text content
-            if docling_doc.text:
-                content_parts.append(docling_doc.text)
-            
-            # Extract text from sections if available
-            if hasattr(docling_doc, 'sections'):
-                for section in docling_doc.sections:
-                    if section.text:
-                        content_parts.append(f"\nSection: {section.title if section.title else 'Untitled'}\n{section.text}")
-            
-            # Extract tables if available
-            if hasattr(docling_doc, 'tables'):
-                for i, table in enumerate(docling_doc.tables):
-                    if table.text:
-                        content_parts.append(f"\nTable {i+1}:\n{table.text}")
-            
-            # Combine all content
-            content = "\n\n".join(content_parts)
-            
-            # Check if content is empty
             if not content or content.isspace():
                 error = EmptyContentError(str(file_path))
                 logger.warning(f"{error.error_type}: {error.message} for {file_path.name}")
@@ -234,27 +346,8 @@ class DocumentProcessor:
                 "created_at": datetime.utcnow().isoformat(),
                 "chunk_size": self.chunk_size,
                 "chunk_overlap": self.chunk_overlap,
-                "processor_version": "2.0.0",
+                "processor_version": "3.0.0",
             }
-            
-            # Add Docling metadata
-            if hasattr(docling_doc, 'metadata'):
-                # Add basic metadata
-                for key, value in docling_doc.metadata.items():
-                    if isinstance(value, (str, int, float, bool)):
-                        metadata[f"docling_{key}"] = str(value)
-                
-                # Add language if detected
-                if hasattr(docling_doc.metadata, 'language'):
-                    metadata['language'] = str(docling_doc.metadata.language)
-                
-                # Add page count if available
-                if hasattr(docling_doc.metadata, 'pages'):
-                    metadata['page_count'] = str(len(docling_doc.metadata.pages))
-                
-                # Add OCR confidence if available
-                if hasattr(docling_doc.metadata, 'ocr_confidence'):
-                    metadata['ocr_confidence'] = str(docling_doc.metadata.ocr_confidence)
             
             # Create a single document
             doc = Document(page_content=content, metadata=metadata)

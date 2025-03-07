@@ -306,10 +306,17 @@ async def ingest_document_folder(
     chunk_overlap: int = Query(200, description="Overlap between chunks", ge=0, lt=5000),
     file_extensions: Optional[List[str]] = Query(None, description="List of file extensions to process"),
     parallel: bool = Query(True, description="Whether to process files in parallel"),
-    max_concurrency: int = Query(5, description="Maximum number of files to process concurrently", ge=1, le=20)
+    max_concurrency: int = Query(5, description="Maximum number of files to process concurrently", ge=1, le=20),
+    enable_ocr: bool = Query(False, description="Whether to enable OCR for images in PDFs"),
+    ocr_model_path: Optional[str] = Query(None, description="Path to EasyOCR model directory. If None, uses default ~/.EasyOCR/")
 ):
     """
-    Process all supported documents in a directory and add them to the vector store.
+    Process all documents in a directory and add them to the vector store.
+    
+    - Supports PDF, DOCX, PPTX, and other document formats
+    - Extracts text, tables, and optionally performs OCR on images
+    - Chunks the text for better processing
+    - Adds the processed documents to the vector store
     
     Args:
         folder_path: Path to the directory containing documents
@@ -319,29 +326,23 @@ async def ingest_document_folder(
         file_extensions: List of file extensions to process (if None, process all supported types)
         parallel: Whether to process files in parallel
         max_concurrency: Maximum number of files to process concurrently
+        enable_ocr: Whether to enable OCR for images in PDFs
+        ocr_model_path: Path to EasyOCR model directory. If None, uses default ~/.EasyOCR/
         
     Returns:
-        Dict: Processing statistics
+        Dict containing processing statistics and status
     """
-    folder = Path(folder_path)
-    
     # Validate folder path
-    if not folder.exists():
+    if not os.path.exists(folder_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Directory not found: {folder_path}"
         )
-    if not folder.is_dir():
+    
+    if not os.path.isdir(folder_path):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Path is not a directory: {folder_path}"
-        )
-    
-    # Validate chunk parameters
-    if chunk_overlap >= chunk_size:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="chunk_overlap must be less than chunk_size"
         )
     
     try:
@@ -349,7 +350,9 @@ async def ingest_document_folder(
         processor = DocumentProcessor(
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
-            max_concurrency=max_concurrency
+            max_concurrency=max_concurrency,
+            enable_ocr=enable_ocr,
+            ocr_model_path=ocr_model_path
         )
         
         # Process the directory

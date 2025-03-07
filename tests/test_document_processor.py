@@ -7,8 +7,9 @@ import asyncio
 import tempfile
 import requests
 from pathlib import Path
+import pytest
 
-from backend.document_processor import DocumentProcessor, SUPPORTED_EXTENSIONS
+from backend.document_processor import DocumentProcessor, SUPPORTED_EXTENSIONS, DocumentProcessingError
 
 def download_sample_pdf():
     """Download a sample PDF file from a reliable source."""
@@ -97,6 +98,56 @@ async def test_document_processor():
             test_dir.rmdir()
         except Exception as e:
             print(f"Error removing test directory: {str(e)}")
+
+@pytest.fixture
+def processor():
+    return DocumentProcessor()
+
+@pytest.fixture
+def test_files_dir():
+    return Path("tests/test_files")
+
+def test_pdf_processing(processor, test_files_dir):
+    pdf_path = test_files_dir / "sample.pdf"
+    documents, error = processor.process_file(pdf_path)
+    
+    assert error is None
+    assert len(documents) > 0
+    assert all(doc.page_content for doc in documents)
+    assert documents[0].metadata["file_type"] == "PDF Document"
+
+def test_docx_processing(processor, test_files_dir):
+    docx_path = test_files_dir / "sample.docx"
+    documents, error = processor.process_file(docx_path)
+    
+    assert error is None
+    assert len(documents) > 0
+    assert all(doc.page_content for doc in documents)
+    assert documents[0].metadata["file_type"] == "Word Document"
+
+def test_pptx_processing(processor, test_files_dir):
+    pptx_path = test_files_dir / "sample.pptx"
+    documents, error = processor.process_file(pptx_path)
+    
+    assert error is None
+    assert len(documents) > 0
+    assert all(doc.page_content for doc in documents)
+    assert documents[0].metadata["file_type"] == "PowerPoint Presentation"
+
+def test_unsupported_file(processor, test_files_dir):
+    txt_path = test_files_dir / "sample.txt"
+    documents, error = processor.process_file(txt_path)
+    
+    assert isinstance(error, DocumentProcessingError)
+    assert error.error_type == "unsupported_format"
+    assert len(documents) == 0
+
+def test_nonexistent_file(processor):
+    documents, error = processor.process_file("nonexistent.pdf")
+    
+    assert isinstance(error, DocumentProcessingError)
+    assert error.error_type == "processing_error"
+    assert len(documents) == 0
 
 if __name__ == "__main__":
     asyncio.run(test_document_processor()) 

@@ -1,14 +1,21 @@
 """
 Script to download Docling models for offline use.
 This script downloads all necessary models to process PDF, Word, PowerPoint, Excel, and RTF documents.
+
+According to the official documentation:
+- For processing PDF documents, Docling requires model weights from https://huggingface.co/ds4sd/docling-models
+- Models are stored in $HOME/.cache/docling/models by default
+- The script mimics the 'docling-tools models download' utility
+
+Additional models included:
+- sentence-transformers/all-MiniLM-L6-v2: Sentence transformer model for document embeddings
 """
 
 import os
 import requests
-from pathlib import Path
-import json
 import sys
 import time
+from pathlib import Path
 
 def get_token():
     """Get Hugging Face token from environment variable or user input."""
@@ -27,63 +34,63 @@ def get_token():
 
 # Models required for document processing
 MODELS = {
-    # LayoutLM model for document layout analysis (primarily for PDFs)
-    "layoutlm": {
-        "base_url": "https://huggingface.co/microsoft/layoutlm-base-uncased/resolve/main",
+    # Layout model for document layout analysis
+    "layout": {
+        "base_url": "https://huggingface.co/ds4sd/docling-models/resolve/main/model_artifacts",
+        "files": [
+            "layout/config.json",
+            "layout/pytorch_model.bin",
+            "layout/preprocessor_config.json"
+        ],
+        "target_dir": "layout"
+    },
+    # TableFormer model for table extraction
+    "tableformer": {
+        "base_url": "https://huggingface.co/ds4sd/docling-models/resolve/main/model_artifacts",
+        "files": [
+            "tableformer/config.json",
+            "tableformer/pytorch_model.bin",
+            "tableformer/preprocessor_config.json"
+        ],
+        "target_dir": "tableformer"
+    },
+    # Picture classifier model
+    "picture_classifier": {
+        "base_url": "https://huggingface.co/ds4sd/docling-models/resolve/main/model_artifacts",
+        "files": [
+            "picture_classifier/config.json",
+            "picture_classifier/pytorch_model.bin",
+            "picture_classifier/preprocessor_config.json"
+        ],
+        "target_dir": "picture_classifier"
+    },
+    # Code formula model
+    "code_formula": {
+        "base_url": "https://huggingface.co/ds4sd/docling-models/resolve/main/model_artifacts",
+        "files": [
+            "code_formula/config.json",
+            "code_formula/pytorch_model.bin",
+            "code_formula/preprocessor_config.json"
+        ],
+        "target_dir": "code_formula"
+    },
+    # Sentence Transformer for embeddings (additional model)
+    "sentence_transformer": {
+        "base_url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main",
         "files": [
             "config.json",
             "pytorch_model.bin",
             "special_tokens_map.json",
             "tokenizer_config.json",
             "tokenizer.json",
-            "vocab.txt"
+            "vocab.txt",
+            "modules.json",
+            "1_Pooling/config.json",
+            "0_Transformer/config.json",
+            "README.md",
+            "sentence_bert_config.json"
         ],
-        "target_dir": "models--microsoft--layoutlm-base-uncased/snapshots/latest"
-    },
-    # OCR model for text extraction from images in PDFs
-    "ocr": {
-        "base_url": "https://huggingface.co/microsoft/trocr-base-printed/resolve/main",
-        "files": [
-            "config.json",
-            "pytorch_model.bin",
-            "special_tokens_map.json",
-            "tokenizer_config.json",
-            "generation_config.json"
-        ],
-        "target_dir": "models--microsoft--trocr-base-printed/snapshots/latest"
-    },
-    # Alternative OCR model (Tesseract-based)
-    "alt_ocr": {
-        "base_url": "https://huggingface.co/microsoft/dit-base/resolve/main",
-        "files": [
-            "config.json",
-            "pytorch_model.bin",
-            "preprocessor_config.json"
-        ],
-        "target_dir": "models--microsoft--dit-base/snapshots/latest"
-    },
-    # Table extraction model for Excel, Word tables, and PDF tables
-    "table": {
-        "base_url": "https://huggingface.co/microsoft/table-transformer-detection/resolve/main",
-        "files": [
-            "config.json",
-            "pytorch_model.bin",
-            "preprocessor_config.json"
-        ],
-        "target_dir": "models--microsoft--table-transformer-detection/snapshots/latest"
-    },
-    # Document understanding model for Word, PowerPoint, and RTF
-    "donut": {
-        "base_url": "https://huggingface.co/naver-clova-ix/donut-base/resolve/main",
-        "files": [
-            "config.json",
-            "pytorch_model.bin",
-            "preprocessor_config.json",
-            "special_tokens_map.json",
-            "tokenizer_config.json",
-            "tokenizer.json"
-        ],
-        "target_dir": "models--naver-clova-ix--donut-base/snapshots/latest"
+        "target_dir": "models--sentence-transformers--all-MiniLM-L6-v2/snapshots/latest"
     }
 }
 
@@ -113,23 +120,16 @@ def download_file(url: str, target_path: Path, description: str, token: str):
                     f.write(response.content)
                 else:
                     downloaded = 0
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            # Calculate progress
-                            progress = int(50 * downloaded / total_size)
-                            print(f"\r[{'=' * progress}{' ' * (50-progress)}] {downloaded}/{total_size} bytes", end='')
-            print(f"\nSaved to {target_path}")
+                    for data in response.iter_content(chunk_size=4096):
+                        downloaded += len(data)
+                        f.write(data)
+                        done = int(50 * downloaded / total_size)
+                        percent = int(100 * downloaded / total_size)
+                        sys.stdout.write(f"\r[{'=' * done}{' ' * (50 - done)}] {percent}%")
+                        sys.stdout.flush()
             
-            # Verify file was downloaded correctly
-            if not target_path.exists():
-                raise FileNotFoundError(f"Failed to save file to {target_path}")
+            print()  # New line after progress bar
             
-            # Verify file size if we know the expected size
-            if total_size > 0 and target_path.stat().st_size != total_size:
-                raise ValueError(f"Downloaded file size ({target_path.stat().st_size} bytes) doesn't match expected size ({total_size} bytes)")
-                
             # If we get here, download was successful
             return
             
@@ -148,9 +148,10 @@ def main():
     
     # Get user's home directory in a cross-platform way
     home_dir = Path.home()
-    cache_dir = home_dir / ".cache" / "huggingface" / "hub"
+    # Use the standard Docling cache directory
+    cache_dir = home_dir / ".cache" / "docling" / "models"
     
-    print(f"Creating base cache directory at: {cache_dir}")
+    print(f"Creating Docling models directory at: {cache_dir}")
     cache_dir.mkdir(parents=True, exist_ok=True)
     
     # Track overall progress
@@ -162,7 +163,14 @@ def main():
     for model_name, model_info in MODELS.items():
         print(f"\n[{completed_models + 1}/{total_models}] Downloading {model_name} model...")
         
-        model_dir = cache_dir / model_info["target_dir"]
+        if model_name == "sentence_transformer":
+            # For sentence transformer, use the huggingface hub structure
+            hf_cache_dir = home_dir / ".cache" / "huggingface" / "hub"
+            model_dir = hf_cache_dir / model_info["target_dir"]
+        else:
+            # For Docling models, use the Docling cache structure
+            model_dir = cache_dir / model_info["target_dir"]
+        
         model_dir.mkdir(parents=True, exist_ok=True)
         
         # Track files successfully downloaded for this model
@@ -172,7 +180,17 @@ def main():
         # Download each file for this model
         for file_path in model_info["files"]:
             url = f"{model_info['base_url']}/{file_path}"
-            target_path = model_dir / file_path
+            
+            if model_name == "sentence_transformer":
+                target_path = model_dir / Path(file_path).name
+            else:
+                # For Docling models, strip the model name from the path
+                file_name = Path(file_path).name
+                target_path = model_dir / file_name
+            
+            # Ensure parent directories exist for nested paths
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            
             try:
                 download_file(url, target_path, f"{model_name}/{file_path}", token)
                 files_downloaded += 1
@@ -181,40 +199,44 @@ def main():
                 print("Continuing with other files...")
                 continue
         
-        # Create the refs directory and save the version reference for this model
-        model_base_dir = model_dir.parent.parent
-        refs_dir = model_base_dir / "refs"
-        refs_dir.mkdir(exist_ok=True)
-        
-        with open(refs_dir / "main", "w") as f:
-            f.write("latest")
+        # For sentence transformer, create the refs directory
+        if model_name == "sentence_transformer":
+            model_base_dir = model_dir.parent.parent
+            refs_dir = model_base_dir / "refs"
+            refs_dir.mkdir(exist_ok=True)
+            
+            with open(refs_dir / "main", "w") as f:
+                f.write("latest")
         
         # Check if we downloaded at least some files for this model
         if files_downloaded > 0:
+            print(f"Downloaded {files_downloaded}/{files_total} files for {model_name} model.")
             completed_models += 1
-            print(f"Completed downloading {model_name} model ({files_downloaded}/{files_total} files)")
-            
-            # If we didn't get all files, add to partial failures
-            if files_downloaded < files_total:
-                failed_models.append(f"{model_name} (partial: {files_downloaded}/{files_total} files)")
         else:
-            failed_models.append(f"{model_name} (complete failure)")
-            print(f"Failed to download any files for {model_name} model")
+            print(f"Failed to download any files for {model_name} model.")
+            failed_models.append(model_name)
     
-    print("\n=== Download Summary ===")
-    print(f"Successfully downloaded {completed_models}/{total_models} models")
+    # Print summary
+    print("\n" + "=" * 50)
+    print(f"Download summary: {completed_models}/{total_models} models downloaded successfully.")
     
     if failed_models:
-        print("\nThe following models had issues:")
-        for model in failed_models:
-            print(f"- {model}")
-        print("\nYou may need to manually download these models or try again later.")
+        print(f"Failed models: {', '.join(failed_models)}")
     
-    print("\nDownload complete! Models are ready for offline use.")
-    print(f"Models are stored in: {cache_dir}")
-    print("\nTo use Docling in offline mode, set these environment variables:")
-    print("set DOCLING_OFFLINE=1")
-    print("set HF_HUB_OFFLINE=1")
+    # Print instructions for using the downloaded models
+    print("\nTo use these models with Docling in offline mode:")
+    print("1. Set the following environment variables:")
+    print("   - HF_HUB_OFFLINE=1")
+    print("   - DOCLING_OFFLINE=1")
+    print("2. When initializing DocumentConverter, specify the artifacts path:")
+    print(f"   pipeline_options = PdfPipelineOptions(artifacts_path=\"{cache_dir}\")")
+    print("   converter = DocumentConverter(format_options={")
+    print("       InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)")
+    print("   })")
+    
+    print("\nModels are stored in:")
+    print(f"- Docling models: {cache_dir}")
+    print(f"- Sentence transformer: {home_dir / '.cache' / 'huggingface' / 'hub' / 'models--sentence-transformers--all-MiniLM-L6-v2'}")
 
 if __name__ == "__main__":
     main() 
