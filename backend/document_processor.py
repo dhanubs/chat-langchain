@@ -15,7 +15,7 @@ import traceback
 import warnings
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Union, Tuple
+from typing import List, Optional, Dict, Any, Union, Tuple, cast
 import io
 import numpy as np
 
@@ -27,6 +27,8 @@ from langchain_openai import AzureOpenAIEmbeddings
 from backend.config import settings
 
 import fitz  # PyMuPDF
+from fitz import Document as FitzDocument
+from fitz import Page as FitzPage
 import pdfplumber
 import easyocr
 from PIL import Image
@@ -234,14 +236,16 @@ class DocumentProcessor:
         
         # Extract text and images with PyMuPDF
         with fitz.open(file_path) as doc:
+            doc = cast(FitzDocument, doc)  # Type hint for better IDE support
             for page_num, page in enumerate(doc):
+                page = cast(FitzPage, page)  # Type hint for better IDE support
                 # Get regular text blocks
                 blocks = page.get_text("dict")["blocks"]
                 page_text_parts = []
                 
                 for block in blocks:
                     # Skip blocks that significantly overlap with table regions
-                    block_bbox = (block.get('bbox', [0, 0, 0, 0]))
+                    block_bbox = tuple(block.get('bbox', [0, 0, 0, 0]))
                     is_in_table = any(
                         self._regions_overlap(block_bbox, table['bbox'])
                         for table in table_regions
