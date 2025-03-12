@@ -216,53 +216,17 @@ class DocumentProcessor:
     def process_pdf(self, file_path: Union[str, Path]) -> str:
         """Extract text from PDF including OCR for images if enabled."""
         text_parts = []
-        table_regions = []  # Track table regions to avoid duplicating content
-        
-        # First, extract tables with pdfplumber to get their regions
-        with pdfplumber.open(file_path) as pdf:
-            for page_num, page in enumerate(pdf.pages, 1):
-                tables = page.extract_tables()
-                for table_num, table in enumerate(tables, 1):
-                    if table:
-                        # Get table bounds
-                        table_text = '\n'.join(['\t'.join([str(cell or '') for cell in row]) for row in table])
-                        if table_text.strip():  # Only process non-empty tables
-                            # Store table content and its region
-                            table_regions.append({
-                                'page': page_num - 1,  # PyMuPDF uses 0-based page numbers
-                                'bbox': page.bbox,  # Store table region
-                                'content': f"Page {page_num} Table {table_num}:\n{table_text}"
-                            })
         
         # Extract text and images with PyMuPDF
         with fitz.open(file_path) as doc:
             doc = cast(FitzDocument, doc)  # Type hint for better IDE support
             for page_num, page in enumerate(doc):
                 page = cast(FitzPage, page)  # Type hint for better IDE support
-                # Get regular text blocks
-                blocks = page.get_text("dict")["blocks"]
-                page_text_parts = []
                 
-                for block in blocks:
-                    # Skip blocks that significantly overlap with table regions
-                    block_bbox = tuple(block.get('bbox', [0, 0, 0, 0]))
-                    is_in_table = any(
-                        self._regions_overlap(block_bbox, table['bbox'])
-                        for table in table_regions
-                        if table['page'] == page_num
-                    )
-                    
-                    if not is_in_table and block.get('type') == 0:  # Type 0 is text
-                        if 'lines' in block:
-                            for line in block['lines']:
-                                if 'spans' in line:
-                                    spans_text = ' '.join(span.get('text', '') for span in line['spans'])
-                                    if spans_text.strip():
-                                        page_text_parts.append(spans_text)
-                
-                # Add page text if any exists
-                if page_text_parts:
-                    text_parts.append(f"Page {page_num + 1}:\n" + '\n'.join(page_text_parts))
+                # Get text in reading order with proper formatting
+                text = page.get_text("text")
+                if text.strip():
+                    text_parts.append(f"Page {page_num + 1}:\n{text}")
                 
                 # Handle images with OCR if enabled
                 if self.enable_ocr and self.reader:
@@ -281,48 +245,7 @@ class DocumentProcessor:
                         except Exception as e:
                             logger.warning(f"Failed to process image on page {page_num + 1}: {str(e)}")
         
-        # Add tables in their original order
-        for table in table_regions:
-            text_parts.append(table['content'])
-        
         return '\n\n'.join(text_parts)
-
-    def _regions_overlap(self, bbox1, bbox2, threshold: float = 0.5) -> bool:
-        """
-        Check if two bounding boxes overlap significantly.
-        
-        Args:
-            bbox1: First bounding box (x0, y0, x1, y1)
-            bbox2: Second bounding box (x0, y0, x1, y1)
-            threshold: Minimum overlap ratio to consider regions as overlapping
-            
-        Returns:
-            bool: True if regions overlap significantly
-        """
-        # Get coordinates
-        x1_min, y1_min, x1_max, y1_max = bbox1
-        x2_min, y2_min, x2_max, y2_max = bbox2
-        
-        # Calculate intersection
-        x_min = max(x1_min, x2_min)
-        y_min = max(y1_min, y2_min)
-        x_max = min(x1_max, x2_max)
-        y_max = min(y1_max, y2_max)
-        
-        if x_min >= x_max or y_min >= y_max:
-            return False
-        
-        intersection = (x_max - x_min) * (y_max - y_min)
-        area1 = (x1_max - x1_min) * (y1_max - y1_min)
-        area2 = (x2_max - x2_min) * (y2_max - y2_min)
-        
-        # Calculate overlap ratio relative to the smaller area
-        smaller_area = min(area1, area2)
-        if smaller_area == 0:
-            return False
-            
-        overlap_ratio = intersection / smaller_area
-        return overlap_ratio > threshold
 
     def process_docx(self, file_path: Union[str, Path]) -> str:
         """Extract text from DOCX files."""
