@@ -34,7 +34,7 @@ _PROVIDER_MAP = {
 
 # Updated model mapping
 _MODEL_MAP = {
-    "azure": "gpt-35-turbo-16k",  # Your Azure deployment name
+    "azure": "gpt-4o-mini",  # Your Azure deployment name
     "openai": "gpt-4o-mini",  # Vanilla OpenAI model
     "anthropic": "claude-3-haiku-20240307",
     "google": "gemini-pro",
