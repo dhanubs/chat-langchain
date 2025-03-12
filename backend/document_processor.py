@@ -216,6 +216,7 @@ class DocumentProcessor:
     def process_pdf(self, file_path: Union[str, Path]) -> str:
         """Extract text from PDF including OCR for images if enabled."""
         text_parts = []
+        seen_images = set()  # Track image hashes to identify duplicates
         
         # Extract text and images with PyMuPDF
         with fitz.open(file_path) as doc:
@@ -234,8 +235,23 @@ class DocumentProcessor:
                         try:
                             xref = img[0]
                             base_img = doc.extract_image(xref)
+                            
+                            # Create a hash of the image data to identify duplicates
+                            img_hash = hash(base_img["image"])
+                            
+                            # Skip if we've seen this image before (likely a logo or header/footer)
+                            if img_hash in seen_images:
+                                continue
+                            
+                            # Process new images
+                            seen_images.add(img_hash)
                             image_bytes = base_img["image"]
                             image = Image.open(io.BytesIO(image_bytes))
+                            
+                            # Skip very small images (likely icons or decorative elements)
+                            if image.width < 50 or image.height < 50:
+                                continue
+                                
                             image_np = np.array(image)
                             results = self.reader.readtext(image_np)
                             if results:
